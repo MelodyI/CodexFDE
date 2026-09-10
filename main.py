@@ -1,4 +1,4 @@
-"""Start or reopen the workbench and FlowERP using saved local data paths."""
+"""Restart the workbench and reopen FlowERP using saved local data paths (--reuse opts out)."""
 from __future__ import annotations
 
 import os

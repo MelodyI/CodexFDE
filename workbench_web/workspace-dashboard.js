@@ -29,14 +29,22 @@ function uiElement(tag, className, text) {
   if(text!==undefined)el.textContent=text; return el;
 }
 let homeRows=[], homeFilter='attention', homeRead=0;
-async function setHomeCleared(row, button) {
+const homeClearNotices=new Map();
+async function setHomeCleared(row, button, notice) {
   if(button.disabled)return;
+  const report=text=>{homeClearNotices.set(row.item.id,text);notice.textContent=text;};
+  if(!Object.prototype.hasOwnProperty.call(row.item,'home_hidden')) {
+    report('当前服务尚未加载清除功能，请重启 8001 工作台服务后刷新页面。仅刷新页面不能更新后台。');
+    return;
+  }
   button.disabled=true;
+  report(row.item.home_hidden?'正在恢复…':'正在清除…');
   try {
     await api('/api/v1/initiatives/'+encodeURIComponent(row.item.id)+(row.item.home_hidden?'/restore-home':'/clear-home'),
       {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actor:actorName(),version:row.item.version})});
+    homeClearNotices.delete(row.item.id);
     await refreshProjectHome();
-  } catch(error) {show('home-status','清除或恢复未完成：'+error.message);}
+  } catch(error) {report('清除或恢复未完成：'+error.message);}
   finally {button.disabled=false;}
 }
 async function openProjectInitiative(id) {
@@ -73,7 +81,10 @@ function renderProjectHome() {
     clear.title='从首页移出，可恢复；交付记录和失败证据保留。';
     clear.disabled=view.group==='running' || view.group==='unknown';
     if(clear.disabled)clear.title='请等待运行结束并刷新状态后再清除。';
-    clear.onclick=()=>setHomeCleared(row,clear);next.append(clear);
+    const notice=uiElement('p','hint',homeClearNotices.get(item.id) || '');
+    notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
+    card.append(notice);
+    clear.onclick=()=>setHomeCleared(row,clear,notice);next.append(clear);
     if(item.home_hidden)meta.append(uiElement('span','demo-badge','已从首页清除'));
   }
   if(!visible.length) {

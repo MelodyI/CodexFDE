@@ -1,4 +1,4 @@
-"""Local desktop entry: reopen the same workbench without duplicating its service."""
+"""Local desktop entry with an explicit, identity-checked workbench restart."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +18,86 @@ import webbrowser
 from .runtime_lease import WorkbenchRuntimeLease
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def listener_process(port: int) -> tuple[int, list[str]]:
+    """Read the actual listener and parse its Windows command line without a shell."""
+    if os.name != 'nt':
+        raise RuntimeError('自动重启目前支持 Windows；请先停止原工作台服务，或使用 --reuse')
+    script = ('[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); '
+              f'$owners = @(Get-NetTCPConnection -LocalPort {int(port)} -State Listen '
+              '| Select-Object -ExpandProperty OwningProcess -Unique); '
+              'if ($owners.Count -ne 1) { throw "Listener is not unique" }; '
+              'Get-CimInstance Win32_Process -Filter ("ProcessId=" + $owners[0]) '
+              '| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress')
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                            capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError('无法核对旧服务进程，未停止任何进程')
+    try:
+        data = json.loads(result.stdout.decode('utf-8-sig'))
+        import ctypes
+        from ctypes import wintypes
+        parse = ctypes.windll.shell32.CommandLineToArgvW
+        parse.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        parse.restype = ctypes.POINTER(wintypes.LPWSTR)
+        count = ctypes.c_int()
+        pointer = parse(data['CommandLine'], ctypes.byref(count))
+        if not pointer:
+            raise ValueError('Missing command line')
+        try:
+            arguments = [pointer[i] for i in range(count.value)]
+        finally:
+            free = ctypes.windll.kernel32.LocalFree
+            free.argtypes = [ctypes.c_void_p]
+            free.restype = ctypes.c_void_p
+            free(ctypes.cast(pointer, ctypes.c_void_p))
+        return int(data['ProcessId']), arguments
+    except (ValueError, KeyError, TypeError) as error:
+        raise RuntimeError('无法识别旧服务命令，未停止任何进程') from error
+
+
+def stop_workbench(runtime: Path, port: int, timeout: float = 20) -> None:
+    """Only stop the verified workbench listener; never kill a process tree."""
+    if inspect_service(port, runtime) != 'same':
+        raise RuntimeError('旧服务身份已变化，取消重启')
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    def read(path):
+        with opener.open(f'http://127.0.0.1:{port}{path}', timeout=5) as response:
+            return json.load(response)
+    try:
+        for item in read('/api/v1/initiatives')['items']:
+            flow = read('/api/v1/initiatives/' + item['id'] + '/workflow')
+            if flow.get('stage') in {'researching', 'queued', 'executing', 'cancelling', 'integrating'}:
+                raise RuntimeError('工作台仍有运行中的事项，请先在页面停止任务并等待结束，再重启')
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError('无法核对运行中的事项，未停止旧服务') from error
+    pid, arguments = listener_process(port)
+    try:
+        module = arguments.index('-m')
+        location = arguments[arguments.index('--runtime-dir') + 1]
+        listener_port = arguments[arguments.index('--port') + 1]
+        matches = (arguments[module + 1:module + 3] == ['workbench.cli', 'serve-workbench']
+                   and Path(location).is_absolute() and Path(location).resolve() == runtime.resolve()
+                   and int(listener_port) == port and pid > 0 and pid != os.getpid())
+    except (ValueError, IndexError):
+        matches = False
+    if not matches:
+        raise RuntimeError('监听进程不是指定目录的工作台服务，未停止任何进程')
+    print(f'正在重启工作台（端口 {port}，旧进程 {pid}），任务与证据保留。', flush=True)
+    result = subprocess.run(['taskkill.exe', '/PID', str(pid), '/F'], capture_output=True,
+                            timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if result.returncode:
+        raise RuntimeError('未能停止旧工作台服务，请核对权限或原启动窗口')
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = inspect_service(port, runtime)
+        if state == 'free':
+            return
+        if state == 'occupied':
+            raise RuntimeError('端口已被其他服务接管，取消启动')
+        time.sleep(.2)
+    raise RuntimeError('旧服务尚未释放端口，未启动第二个实例')
 
 
 def wait_for_product_release(runtime: Path, *, timeout: float = 35) -> None:
@@ -66,7 +146,7 @@ def inspect_service(port: int, runtime: Path, surface: str = 'workbench') -> str
 
 
 def launch(runtime: Path, port: int = 8001, *, timeout: float = 20,
-           surface: str = 'workbench', erp_port: int = 8000) -> dict:
+           surface: str = 'workbench', erp_port: int = 8000, restart: bool = False) -> dict:
     if surface not in {'workbench', 'flowerp'}:
         raise ValueError('未知的本地服务')
     label = '工作台' if surface == 'workbench' else 'FlowERP'
@@ -76,6 +156,11 @@ def launch(runtime: Path, port: int = 8001, *, timeout: float = 20,
     with WorkbenchRuntimeLease(runtime / ('desktop-launch-' + surface)):
         state = inspect_service(port, runtime, surface)
         url = f'http://127.0.0.1:{port}'
+        restarted = False
+        if state == 'same' and restart and surface == 'workbench':
+            stop_workbench(runtime, port, timeout)
+            restarted = True
+            state = inspect_service(port, runtime, surface)
         if state == 'same':
             return {'state': 'reused', 'url': url}
         if state != 'free':
@@ -113,7 +198,7 @@ def launch(runtime: Path, port: int = 8001, *, timeout: float = 20,
                 raise RuntimeError(f'{label}未能启动。原因保存在：{log}')
             state = inspect_service(port, runtime, surface)
             if state == 'same':
-                return {'state': 'started', 'url': url, 'pid': process.pid, 'log': str(log)}
+                return {'state': 'restarted' if restarted else 'started', 'url': url, 'pid': process.pid, 'log': str(log)}
             time.sleep(.2)
         raise RuntimeError(f'{label}仍未就绪，请先查看启动日志，不要连续重试：{log}')
 
@@ -125,6 +210,7 @@ def main(argv=None):
     parser.add_argument('--port', type=int, default=8001)
     parser.add_argument('--erp-port', type=int, default=8000)
     parser.add_argument('--open-browser', action='store_true')
+    parser.add_argument('--reuse', action='store_true', help='复用已有工作台，不重启；默认重启同目录的旧工作台')
     args = parser.parse_args(argv)
     if not all(1 <= port <= 65535 for port in (args.port, args.erp_port)) or args.port == args.erp_port:
         parser.error('工作台和 FlowERP 必须使用 1 到 65535 之间的不同端口')
@@ -136,7 +222,7 @@ def main(argv=None):
         print(str(error), file=sys.stderr)
         return 1
     try:
-        result = launch(workbench_runtime, args.port, erp_port=args.erp_port)
+        result = launch(workbench_runtime, args.port, erp_port=args.erp_port, restart=not args.reuse)
     except (OSError, RuntimeError, sqlite3.Error) as error:
         print(f'暂时无法打开工作台：{error}', file=sys.stderr)
         return 1

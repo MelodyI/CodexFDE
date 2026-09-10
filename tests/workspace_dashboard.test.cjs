@@ -86,6 +86,22 @@ test('cleared cards stay hidden until requested and running cards cannot be clea
   assert.equal(node('home-items').children[0].children[3].children[2].textContent,'恢复到首页');
 });
 
+test('old service and request failures explain the problem beside the clicked card',async()=>{
+  const {context}=setup();
+  let calls=0;
+  context.api=async()=>{calls++;throw new Error('network unavailable');};
+  context.actorName=()=> 'tester';
+  const notice={textContent:''},button={disabled:false};
+  await context.setHomeCleared({item:{id:'old'}},button,notice);
+  assert.equal(calls,0);
+  assert.match(notice.textContent,/重启 8001/);
+  await context.setHomeCleared({item:{id:'new',home_hidden:0,version:1}},button,notice);
+  assert.equal(calls,1);
+  assert.match(notice.textContent,/network unavailable/);
+  assert.equal(button.disabled,false);
+  assert.match(vm.runInContext("homeClearNotices.get('new')",context),/network unavailable/);
+});
+
 test('candidate inspection uses a top-level link without a blocked cross-origin frame',async()=>{
   const {context,node}=setup();
   context.actorName=()=> 'automated test';
