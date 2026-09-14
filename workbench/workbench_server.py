@@ -360,6 +360,8 @@ def make_handler(app: WorkbenchApp):
                             raise ValueError('事项操作路径无效')
                         item_id, action = parts[-3], parts[-1]
                         service, revision = app.initiative_workflow, body.get('revision')
+                        if action == 'learning':
+                            return self._json(200, service.learning_action(item_id, actor, revision, body.get('fields')))
                         if action == 'v0':
                             return self._json(200, service.submit_v0(item_id, actor, revision,
                                 spec_text=body.get('spec_text'), execution_mode=body.get('execution_mode'),

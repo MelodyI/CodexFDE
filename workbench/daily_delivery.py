@@ -67,6 +67,13 @@ def submit_daily(repository, runtime, tasks, plan, on_task_created, *, runner_fa
         eval_factory = lambda w, r, t, c, label: CandidateProjectEval(w, r, t, command, label)
     if manifest(repository, runtime) != plan['source_manifest']:
         raise ValueError('项目源码已变化，请重新准备方案，避免从旧版本开始工作')
+    from .learning import LearningStore
+    learning = LearningStore(tasks.path) if plan.get('learning_binding_id') else None
+    binding_id = plan.get('learning_binding_id')
+    if learning:
+        binding = learning.validate_binding(binding_id, repository)
+        if binding['plan_id'] != plan['plan_id']:
+            raise ValueError('采用快照与执行方案不一致')
     folder = runtime / 'daily-delivery' / plan['plan_id']
     folder.mkdir(parents=True, exist_ok=False)
     spec_path = folder / 'SPEC.md'
@@ -75,6 +82,8 @@ def submit_daily(repository, runtime, tasks, plan, on_task_created, *, runner_fa
                         spec_path=str(spec_path), actor=plan['actor'], execution_mode='codex',
                         write_scope=plan['write_scope'], business_refs=['PROJECT:' + plan['project']['id']] if plan.get('project') else [])
     on_task_created(task)
+    if learning:
+        learning.attach(binding_id, task['id'])
     tasks.append_event(task['id'], '本次需求 Spec 已冻结', actor=plan['actor'],
                        evidence={'sha256': hashlib.sha256(spec_path.read_bytes()).hexdigest()})
     workspace = folder / 'workspace'
@@ -102,6 +111,12 @@ def submit_daily(repository, runtime, tasks, plan, on_task_created, *, runner_fa
     tasks.append_event(task['id'], '日常研发执行前检查', actor=plan['actor'], evidence=before)
     # Existing green checks are normal for new development; do not manufacture red.
     checkpoint()
+    if learning:
+        learning.validate_binding(binding_id, workspace)
+        evidence = {'passed': True, 'workspace': str(workspace), 'baseline': plan['source_sha256'],
+                    'checks': [a['prepared'] for a in binding['assets'] if a['prepared']]}
+        learning.run_event(binding_id, 'precheck', evidence)
+        tasks.append_event(task['id'], '受控流程前置检查通过', actor='harness', evidence=evidence)
     runner = runner_factory(workspace, runtime)
     def execute(current):
         def progress(line):
@@ -112,9 +127,19 @@ def submit_daily(repository, runtime, tasks, plan, on_task_created, *, runner_fa
         checkpoint()
         if evidence.get('success') and not evidence.get('changed_files'):
             evidence = {**evidence, 'success': False, 'message': '没有实际文件改动，不能认定需求已实现'}
+        if learning:
+            learning.run_event(binding_id, 'implement', {'passed': evidence.get('success') is True,
+                'changed_files': evidence.get('changed_files', []), 'binding_sha256': binding['sha256'],
+                'message': evidence.get('message'), 'invocation': evidence.get('invocation')})
         return evidence
     result = run_task(tasks, task['id'], plan['actor'], execution_runner=execute,
                       suite_runner=eval_factory(workspace, runtime, task['id'], cases, 'daily-after'))
+    if learning:
+        report = result.get('result') or {}
+        learning.run_event(binding_id, 'eval', {'passed': result['status'] == 'review',
+            'summary': report.get('summary'), 'report_path': report.get('report_path'),
+            'report_sha256': report.get('report_sha256'), 'candidate_manifest': manifest(workspace, runtime)})
+        learning.finish(task['id'])
     # Include new files in the patch without committing or touching the source index.
     for scope in plan['write_scope']:
         if (workspace / scope).exists() or _git(workspace, 'ls-files', '--', scope):

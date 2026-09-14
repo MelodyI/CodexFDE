@@ -34,6 +34,7 @@ function renderIwAnswers(data, busy) {
   iw('defer-people').disabled=initiativeWorkPending || !data.enabled;
 }
 function renderInitiativeWork(data) {
+  if(typeof renderLearning==='function')renderLearning(data);
   if(initiativeWork && initiativeWork.active_task_id!==data.active_task_id) {
     iw('preview-frame').hidden=true;iw('preview-frame').removeAttribute('src');iw('preview-link').hidden=true;iw('preview-status').textContent='';
   }
@@ -170,6 +171,7 @@ async function initiativeWorkAction(action, extra={}) {
   finally{initiativeWorkPending=false;if(initiativeWork)renderInitiativeWork(initiativeWork);if(actionError)iw('error').textContent=actionError;}
 }
 function initInitiativeWork() {
+  if(typeof initLearning==='function')initLearning();
   document.getElementById('v0-submit').onclick=async()=>{
     const value=id=>document.getElementById(id).value;
     if(!document.getElementById('v0-confirmed').checked){document.getElementById('v0-status').textContent='请先核对并确认本次合同和执行参数。';return;}

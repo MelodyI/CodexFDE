@@ -404,6 +404,14 @@ class TaskStore:
             raise ValueError("审核决定必须是 approve 或 reject")
         if not note:
             raise ValueError("审核理由不能为空")
+        with self.connect() as conn:
+            has_learning = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_bindings'").fetchone()
+        learning = None
+        if has_learning:
+            from .learning import LearningStore
+            learning = LearningStore(self.path)
+            if decision == 'approve':
+                learning.check_acceptance(task_id)
         target = "completed" if decision == "approve" else "rework"
         task = self.get(task_id)
         if decision == 'approve' and task.get('requirement_id') == 'WB-L04-BOOTSTRAP':
@@ -417,8 +425,11 @@ class TaskStore:
                     raise ValueError('Ticket A 必须由实际非构建者亲自复验并审核；当前仍待独立接受')
             from .bootstrap_source import verify_control_source
             verify_control_source((task.get('result') or {}).get('bootstrap_source'))
-        return self.transition(
+        result = self.transition(
             task_id, target, f"老板终审：{decision}；{note}", actor=reviewer,
             evidence={"reviewer": reviewer, "decision": decision, "note": note, "opc_final": True},
             reviewer=reviewer, review_decision=decision, review_note=note,
         )
+        if learning:
+            learning.finish(task_id, note=note)
+        return result

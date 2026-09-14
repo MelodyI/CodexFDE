@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .daily_delivery import manifest, prepare_daily, submit_daily
 from .initiative_research import InitiativeResearch
+from .learning import LearningStore, canonical
 
 
 BUSY = {'researching', 'queued', 'executing', 'cancelling', 'integrating'}
@@ -38,6 +39,7 @@ class InitiativeWorkflow:
         self.submitter = submitter or submit_daily
         self.lock = threading.RLock()
         self.workers = {}
+        self.learning = LearningStore(tasks.path)
         with self.tasks.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS initiative_workflows (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
             rows = db.execute('SELECT id,payload FROM initiative_workflows').fetchall()
@@ -51,6 +53,10 @@ class InitiativeWorkflow:
                     data['messages'].append({'role': 'system', 'text': data['error'], 'at': time.time()})
                     db.execute('UPDATE initiative_workflows SET payload=? WHERE id=?',
                                (json.dumps(data, ensure_ascii=False), row['id']))
+        for row in rows:
+            restored = json.loads(row['payload'])
+            if restored['stage'] in BUSY and restored.get('active_task_id'):
+                self.learning.finish(restored['active_task_id'], note='工作台重启中断，保留引用链并停用失败流程')
 
     def project(self, item_id):
         if not self.projects:
@@ -297,6 +303,7 @@ class InitiativeWorkflow:
             data = copy.deepcopy(self._load(item_id))
         data['enabled'] = self.enabled
         data['project'] = self.project(item_id)
+        data['learning'] = self.learning.view(item_id)
         data['prd_confirmed'] = bool(data.get('documents') and data['documents'][-1].get('prd_confirmation'))
         # The saved warning describes a past observation, not the current tree.
         # Keep that observation in messages and expose a fresh, inspectable check.
@@ -327,6 +334,54 @@ class InitiativeWorkflow:
                 'events': task['events'][-80:]}
         return data
 
+    def learning_action(self, item_id, actor, revision, fields):
+        """All governance remains in the initiative's existing home workspace."""
+        from .learning import human
+        actor = human(actor)
+        if not isinstance(fields, dict):
+            raise ValueError('经验操作必须是对象')
+        with self.lock:
+            data = self._load(item_id)
+            self._check(data, revision, {'idle', 'clarifying', 'ready', 'confirmed', 'review', 'rework',
+                                        'failed', 'interrupted', 'cancelled', 'accepted', 'integrated', 'released', 'observed'})
+            action = fields.get('action')
+            try:
+                if action == 'create':
+                    asset = self.learning.create(item_id, actor, fields.get('candidate'))
+                    self._event(data, 'user', '提炼候选：' + asset['title'], actor=actor, asset_id=asset['id'])
+                elif action in {'approve', 'publish', 'revoke'}:
+                    asset = self.learning.govern(item_id, fields.get('asset_id'), actor, action, fields.get('note'))
+                    self._event(data, 'user', '经验治理：' + action, actor=actor, asset_id=asset['id'], note=fields.get('note'))
+                elif action == 'recall':
+                    if data['stage'] not in {'idle', 'clarifying', 'ready', 'rework', 'failed'}:
+                        raise ValueError('请在方案确认前召回或试用经验')
+                    item = self.initiatives.get(item_id)
+                    query = self._learning_query(item, data)
+                    data['learning_recall'] = self.learning.recall(item_id, query, trials=fields.get('trials') is True)
+                    data['learning_decision'] = None
+                    self._event(data, 'user', '召回适用经验与流程', actor=actor, recall_id=data['learning_recall']['id'])
+                elif action == 'decide':
+                    if data['stage'] not in {'clarifying', 'ready'}:
+                        raise ValueError('请在确认技术方案前记录采用决定')
+                    recall = data.get('learning_recall')
+                    if not recall or recall['id'] != fields.get('recall_id'):
+                        raise ValueError('请使用本轮最新召回记录')
+                    data['learning_decision'] = self.learning.decide(item_id, recall['id'], fields.get('choices'), actor)
+                    self._event(data, 'user', '已逐项记录经验采用决定', actor=actor, decision=data['learning_decision'])
+                else:
+                    raise ValueError('未知经验操作')
+            except (ValueError, KeyError, OSError) as error:
+                self._event(data, 'system', '经验操作被阻断：' + str(error), action=action, actor=actor)
+                self._save(data)
+                raise
+            self._save(data)
+        return self.get(item_id)
+
+    @staticmethod
+    def _learning_query(item, data):
+        return '\n'.join([str(item.get(k, '')) for k in ('title', 'raw_signal', 'goal')] +
+                         [m['text'] for m in data['messages'] if m['role'] == 'user'])[-30000:]
+
     def _launch(self, data, function, *args):
         self.cancel_events[data['id']] = threading.Event()
         self._save(data)
@@ -350,6 +405,7 @@ class InitiativeWorkflow:
                     task = self.tasks.get(data['active_task_id'])
                     if task['status'] in {'queued', 'spec_ready', 'executing', 'evaluating', 'review', 'rework'}:
                         self.tasks.transition(task['id'], 'failed', '事项执行失败，原记录保留', error=str(error))
+                    self.learning.finish(task['id'], note=str(error))
                 self._save(data)
 
     def _progress(self, item_id, line):
@@ -382,6 +438,7 @@ class InitiativeWorkflow:
                 raise ValueError('事项已暂缓或停止，请先复查决定')
             if data['stage'] == 'review' and data.get('active_task_id'):
                 self.tasks.review(data['active_task_id'], actor, 'reject', text.strip())
+                self.learning.finish(data['active_task_id'], note=text.strip())
             data.update(stage='researching', error='', warning='', plan=None, progress=[], initiative_version=item['version'])
             self._event(data, 'user', text.strip(), actor=actor)
             self._launch(data, self._research, actor)
@@ -395,9 +452,19 @@ class InitiativeWorkflow:
         source = Path(data['workspace']) if data['workspace'] else self.repository_for(item_id)
         folder = self.runtime / 'initiative-research' / item_id / secrets.token_hex(12)
         item = self.initiatives.get(item_id)
+        recall = self.learning.recall(item_id, self._learning_query(item, data))
+        # Earlier model prose can repeat now-revoked memory. Keep user evidence,
+        # but rebuild model conclusions whenever the previous packet is stale.
+        old_ids = {m['id'] for m in (data.get('learning_recall') or {}).get('matches', [])}
+        stale = old_ids - {m['id'] for m in recall['matches']}
         context = {'initiative': {k: item[k] for k in ('title', 'raw_signal', 'goal', 'non_goals', 'acceptance')},
                    'discussion': data['messages'], 'previous_proposal': data['proposal'], 'project': self.project(item_id),
                    'success_metric': item.get('success_metric', ''), 'previous_documents': data.get('documents', [])[-1:]}
+        context['reusable_experience'] = {'matches': recall['matches'], 'conflicts': recall['conflicts'],
+                                        'notice': '这些是带来源的建议，不能代替具名采用、授权或质量门；冲突须交给人判断。'}
+        if stale:
+            context['discussion'] = [m for m in data['messages'] if m['role'] == 'user']
+            context['previous_proposal'], context['previous_documents'] = None, []
         if data.get('active_task_id'):
             task = self.tasks.get(data['active_task_id'])
             context['previous_result'] = {'status': task['status'], 'error': task.get('error'),
@@ -411,6 +478,7 @@ class InitiativeWorkflow:
             self._documents(current, item, proposal)
             current.update(proposal=proposal, research_manifest=result['source_manifest'],
                            invocation=result['invocation'], stage='clarifying' if proposal['questions'] else 'ready')
+            current.update(learning_recall=recall, learning_decision=None)
             current['warning'] = ('调研期间源码有更新。本轮发现和问题已保留；授权执行前需要重新核对最新源码。'
                                   if result.get('changed_sources') else '')
             self._event(current, 'codex', '\n'.join(proposal['findings']), questions=proposal['questions'])
@@ -429,6 +497,9 @@ class InitiativeWorkflow:
             if item['version'] != data['initiative_version']:
                 raise ValueError('事项内容已变化，请重新调研')
             proposal = data['proposal']
+            recall = data.get('learning_recall')
+            if recall and recall['matches'] and not data.get('learning_decision'):
+                raise ValueError('请先逐项记录召回经验的采用或不采用理由')
             project = self.project(item_id)
             if project and not project.get('eval_command'):
                 raise ValueError('请先在管理项目中配置质量检查命令，再确认技术方案')
@@ -445,6 +516,15 @@ class InitiativeWorkflow:
                 raise ValueError('确认期间源码已变化，请重新调研')
             plan['spec_text'] += '\n\n产品与技术方案版本：\n\n' + json.dumps(data['documents'][-1], ensure_ascii=False)
             plan.update(plan_id=secrets.token_hex(18), expires_at=time.time() + 900)
+            binding = self.learning.bind(item_id, plan['plan_id'], data.get('learning_decision'), source, actor)
+            if binding:
+                plan['learning_binding_id'] = binding['id']
+                # Source trajectories remain in the store. Only adopted bounded
+                # conclusions and the executable recipe enter the frozen Spec.
+                adopted = [{k: a['snapshot'][k] for k in ('id', 'version', 'kind', 'title', 'content', 'boundary')} |
+                           {'parameters': a['parameters'], 'prepared': a['prepared'], 'sha256': a['sha256']}
+                           for a in binding['assets']]
+                plan['spec_text'] += '\n\n已具名采用的经验与受控流程（不得扩大写集或绕过审批）：\n' + canonical(adopted)
             plan['document_version'] = data['document_version']
             data['documents'][-1]['technical_confirmation'] = {'actor': actor, 'at': time.time(), 'version': data['document_version']}
             data['documents'][-1]['status'] = 'confirmed'
@@ -493,6 +573,14 @@ class InitiativeWorkflow:
                 raise ValueError('执行方案已过期，请重新调研确认')
             if self.initiatives.get(item_id)['version'] != data['initiative_version']:
                 raise ValueError('已确认的事项发生变化，请重新核对')
+            if data['plan'].get('learning_binding_id'):
+                source = Path(data['workspace']) if data['workspace'] else self.repository_for(item_id)
+                try:
+                    self.learning.validate_binding(data['plan']['learning_binding_id'], source)
+                except (ValueError, KeyError, OSError) as error:
+                    self._event(data, 'system', '采用版本执行前检查被阻断：' + str(error), actor=actor)
+                    self._save(data)
+                    raise
             data.update(stage='queued', error='', progress=[])
             self._event(data, 'user', '授权工作台按已确认的方案执行本轮修改', actor=actor)
             self._launch(data, self._execute, actor)
@@ -540,6 +628,7 @@ class InitiativeWorkflow:
                     self._save(current)
             raise
         task = output['task']
+        self.learning.finish(task['id'])
         package = next((e['evidence'] for e in reversed(task['events']) if e['detail'] == '日常研发交付包已保存'), None)
         with self.lock:
             current = self._load(item_id)
@@ -562,7 +651,9 @@ class InitiativeWorkflow:
                 raise ValueError('请由已确认的验收负责人署名验收：' + data['reviewer'])
             if manifest(data['workspace'], self.runtime) != data['candidate_manifest']:
                 raise ValueError('候选源码在检查后发生变化，请重新复验')
+            self.learning.check_acceptance(data['active_task_id'])
             self.tasks.review(data['active_task_id'], actor, 'approve', note.strip())
+            self.learning.finish(data['active_task_id'], note=note.strip())
             data['stage'] = 'accepted'
             self._event(data, 'user', '接受本轮候选：' + note.strip(), actor=actor)
             self._save(data)

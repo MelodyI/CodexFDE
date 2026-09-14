@@ -69,6 +69,39 @@
 <ol id="iw-stage-track" class="stage-track" aria-label="当前交付阶段"></ol>
 <nav class="iw-tabs" aria-label="事项工作区"><button data-iw-pane="action">推进交付</button><button data-iw-pane="plan">方案与范围</button><button data-iw-pane="result">结果与证据</button></nav>
 <p id="iw-error" role="alert"></p>
+<details id="iw-learning"><summary>经验与流程：召回、采用和后续验证</summary>
+<p>候选来自本事项的真实任务。另一事项可以召回并选择采用；未经审核的经验不会进入默认调研。流程先经独立事项试用，再发布。</p>
+<button id="iw-learning-recall" type="button">召回适用经验</button>
+<button id="iw-learning-trial" type="button" class="secondary">包含已批准试用的流程</button>
+<p id="iw-learning-summary" role="status"></p><div id="iw-learning-matches"></div>
+<button id="iw-learning-decide" type="button">保存逐项采用决定</button>
+<details><summary>从本事项提炼候选或修订新版本</summary>
+<label>类型<select id="iw-learning-kind"><option value="memory">经验记忆</option><option value="workflow">受控流程</option></select></label>
+<label>来源任务编号<input id="iw-learning-task" placeholder="本事项已验收或已有接受失败反馈的任务"></label>
+<label>已接受的失败反馈编号（成功任务可留空）<input id="iw-learning-feedback"></label>
+<label>替代的旧版本编号（新建可留空）<input id="iw-learning-supersedes"></label>
+<label>标题<input id="iw-learning-title" maxlength="200"></label>
+<label>从实际轨迹提炼的结论<textarea id="iw-learning-content" rows="3"></textarea></label>
+<label>适用关键词（每行一个）<textarea id="iw-learning-applies" rows="2"></textarea></label>
+<label>不适用关键词（可留空，每行一个）<textarea id="iw-learning-excludes" rows="2"></textarea></label>
+<label>适用条件与不适用边界<textarea id="iw-learning-boundary" rows="2"></textarea></label>
+<label>同类经验的共同主题（用于提醒结论冲突）<input id="iw-learning-conflict" maxlength="200"></label>
+<div id="iw-learning-recipe" hidden>
+<p>流程沿用本事项的授权写集和项目质量检查。前置检查失败即停止；实现或验收失败保留隔离候选并停用此流程版本。</p>
+<label>输入参数名（可留空，每行一个，如 target_file）<textarea id="iw-learning-parameters" rows="2"></textarea></label>
+<label>前置检查文件（每行一个项目相对路径，可用 ${target_file}）<textarea id="iw-learning-paths" rows="2"></textarea></label>
+<label>文件必须包含的内容（可留空，适用于以上每个文件）<input id="iw-learning-contains"></label>
+<label>前置检查说明<textarea id="iw-learning-precheck" rows="2"></textarea></label>
+<label>Codex 实现步骤<textarea id="iw-learning-implement" rows="3"></textarea></label>
+<label>阻断 Eval 应验证的行为<textarea id="iw-learning-eval" rows="2"></textarea></label>
+<label>人工验收应核对的内容<textarea id="iw-learning-review" rows="2"></textarea></label>
+<label>应保留的输出证据（每行一项）<textarea id="iw-learning-outputs" rows="2"></textarea></label>
+<label>停止条件<textarea id="iw-learning-stop" rows="2"></textarea></label>
+<label>回退与恢复方式<textarea id="iw-learning-rollback" rows="2"></textarea></label>
+</div><button id="iw-learning-create" type="button">保存候选，等待独立具名审核</button></details>
+<details><summary>本项目版本、原始依据与审核</summary><div id="iw-learning-assets"></div></details>
+<details><summary>本事项采用快照、执行阶段和验证结果</summary><pre id="iw-learning-evidence"></pre></details>
+</details>
 <div id="iw-source-check" hidden><details><summary id="iw-source-summary">查看项目文件差异</summary><p>只核对上方登记项目目录中的文件，不扫描工作台或其他项目。历史检测记录仍保留在讨论记录中。</p><ul id="iw-source-files"></ul></details><button id="iw-recheck" class="secondary" type="button">保留回答，重新核对项目</button></div>
 <div id="iw-pane-action">
 <section class="next-decision"><span class="eyebrow" id="iw-next-owner">下一步</span><h3 id="iw-next-title"></h3><p id="iw-next-description"></p><ol id="iw-questions"></ol><p id="iw-live-status" role="status" aria-live="polite"></p><div class="activity-line" id="iw-live-output"></div><button id="iw-primary-next" class="primary" hidden>查看下一步</button></section>
@@ -129,4 +162,4 @@
 <dialog id="task-composer"><div class="section-top"><div><span class="eyebrow">NEW DELIVERY</span><h2>开始一项交付</h2></div><button class="icon-button" id="close-composer" aria-label="关闭新建任务">×</button></div><p class="muted">先选择这次要做的事，再核对范围。授权前不会开始改代码。</p><div class="mode-picker" aria-label="本次操作"><button type="button" data-mode="verify" aria-pressed="true" class="active"><b>复验已有成果</b><span>检查现有代码，保留验收记录</span></button><button type="button" data-mode="codex" id="mode-codex" aria-pressed="false" disabled><b>让 Codex 实现</b><span>核对任务范围，再授权隔离执行</span></button></div>
 <p id="mode-help" class="hint" role="status"></p><details id="execution-setup" class="notice" hidden><summary>如何开启网页执行</summary><p>在项目终端中启用网页执行模式。若工作台已经运行，先确认没有正在执行的任务，再到原终端结束该服务；保留原来的运行目录，避免丢失任务入口。</p><pre class="setup-command">.venv/Scripts/python.exe -X utf8 -m workbench.cli serve-workbench --enable-code-execution</pre><p>原服务指定过端口、运行目录或 FlowERP 地址时，重新启动须保留这些参数。随后刷新本页。若仍提示 CLI 不可用，请在同一终端检查 Codex CLI。</p><p>启用入口不会自动执行任务；每次仍须核对具体方案并授权。L04 需要已接受的工作台任务；L15/L16 需要具体需求、新增检查和起始基线。</p></details><form id="task-form"><label for="task-lesson">讲次</label><select id="task-lesson" required><option value="">选择 L04～L16</option><option value="4">L04 · 最小变更与自举换挡</option><option value="5">L05 · Eval</option><option value="6">L06 · Harness</option><option value="7">L07 · Hooks</option><option value="8">L08 · CI</option><option value="9">L09 · Repair Task</option><option value="10">L10 · Loop</option><option value="11">L11 · Subagents</option><option value="12">L12 · Graph 与人审</option><option value="13">L13 · Task API</option><option value="14">L14 · Web 状态面板</option><option value="15">L15 · 反馈闭环</option><option value="16">L16 · 冷启动答辩</option></select><div id="verify-fields"><label for="task-request">现场需求</label><textarea id="task-request" maxlength="1000" rows="5" placeholder="我希望解决什么问题？怎样算完成？哪些内容不在本次范围？" required></textarea><details><summary>关联现有采购单或库存对象（可选）</summary><label for="task-business-refs">业务对象编号</label><textarea id="task-business-refs" rows="2" placeholder="例如 PURCHASE:PUR-实际采购单编号；多个编号换行填写"></textarea><p class="hint">只保存对账线索，不会创建、审批采购单，也不表示已核实其内容。</p></details><div class="notice"><b>本次进行自动复验</b><p>校验课程合同并运行检查，等待你验收。此按钮不会调用 Codex 修改代码。</p></div><div class="submit-row composer-submit"><p id="task-submit-status" class="hint" role="status" aria-live="polite">代码执行需要单独确认范围并授权。</p><button id="task-submit" class="primary" type="submit">提交并复验</button></div></div></form>
 <section id="code-entry" hidden><div id="code-options"><hr><h3>执行本讲课程任务</h3><p class="muted">L04～L14 按本讲合同实现；L15 / L16 填写本次具体需求。下一步会展示目标、文件范围与验收要求。</p><div class="notice" id="code-bootstrap-field" hidden><label for="code-bootstrap">L04：已接受的工作台任务编号</label><input id="code-bootstrap" placeholder="TASK-…"><p>先由同伴独立复验并接受工作台，再交付库存导出。其他讲次无需填写。</p></div><details><summary>L15 / L16：本次需求的补充条件</summary><label for="code-requirement-spec">本次需求 Spec（六段式 Markdown）</label><textarea id="code-requirement-spec" rows="8" maxlength="40000" placeholder="粘贴包含来源、目标、非目标、约束、验收用例、完成定义的具体需求"></textarea><label for="code-cases">新增检查用例（逗号分隔）</label><input id="code-cases"><label for="code-baseline">本次需求起始基线</label><input id="code-baseline"><p class="hint">先保证既有合同通过，新增用例至少一项真实失败；否则不会启动代码执行。</p></details><button id="prepare-code" type="button" class="primary">查看范围与执行方案</button></div><p id="code-status" role="status"></p><div id="code-plan" hidden><h3>请核对本次授权</h3><button id="edit-code" type="button" class="primary">返回调整</button><p id="code-plan-text" style="white-space:pre-line;line-height:1.8;overflow-wrap:anywhere"></p><details><summary>核对文件范围、检查用例与起始版本</summary><pre id="code-plan-technical" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details><button id="authorize-code" type="button" class="primary">我已核对，授权本次隔离执行</button></div></section></dialog>
-<script src="./workspace-dashboard.js"></script><script src="./initiative_workflow.js"></script><script src="./initiatives.js"></script><script src="./app.js"></script></body></html>
+<script src="./workspace-dashboard.js"></script><script src="./initiative_workflow.js"></script><script src="./learning.js"></script><script src="./initiatives.js"></script><script src="./app.js"></script></body></html>
