@@ -28,7 +28,7 @@ def build(root: Path, output: Path) -> dict:
     files = [p for p in files if p.relative_to(root).as_posix() != 'eval/report.json'
              and not any(part in {'reports', '_build', '.cache'} for part in p.relative_to(root).parts)]
     required = {'首次使用.cmd', '打开工作台.cmd', 'workbench/setup_desktop.py',
-                'workbench_web/index.html', 'web/index.html', 'docs/courses/session-versions.json'}
+                'workbench_web/index.html', 'docs/courses/session-versions.json'}
     if missing := required - {p.relative_to(root).as_posix() for p in files}:
         raise ValueError('缺少安装文件：' + ', '.join(sorted(missing)))
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -46,6 +46,9 @@ def build(root: Path, output: Path) -> dict:
             '1. 按 L00 安装 Python 3.10 或更新版本和 Git。\n'
             '2. 双击“首次使用.cmd”，等待出现“准备完成”。首次安装需要联网。\n'
             '3. 双击“打开工作台.cmd”，在网页填写自己的姓名或课堂昵称。\n\n'
+            'FlowERP 是独立客户项目，本包不包含其业务源码。请另行克隆 https://github.com/congde/flowERP.git，'
+            '在该仓库创建自己的 .venv 并安装，在工作台登记项目或设置 FLOWERP_PROJECT_ROOT。'
+            '只使用工作台时可运行 .venv\\Scripts\\python.exe -X utf8 -m workbench.cli serve-workbench。\n\n'
             'L01～L03 按讲义亲手搭建；L04 起通过工作台交付。使用 Codex 写代码前，'
             '还需完成 L00 的 Codex 安装登录，并核对、授权本次修改。\n\n'
             '以后直接打开工作台。原任务保存在本目录的 .runtime，不要删除或与别人的目录混用。'

@@ -543,7 +543,7 @@ function addNotes(slide, blueprint, meta, page) {
     `时间点：${page.time}`,
     `本页目的：${page.title}`,
     `讲解边界：${meta.boundary}`,
-    `讲义：docs/courses/L${String(blueprint.number).padStart(2, "0")}-*.md`,
+    `讲义：docs/courses/L${String(blueprint.number).padStart(2, "0")}/行动卡.md`,
     `一手来源核验日期：${blueprint.verifiedAt}`,
     sources,
   ].join("\n"));
@@ -698,7 +698,7 @@ async function buildDeck(blueprint) {
           break;
         case 22:
           addText(slide, "课后行动", { left: 100, top: 182, width: 300, height: 45 }, { fontSize: 23, bold: true, color: meta.accent });
-          addBody(slide, `${meta.command}\n\n任务卡：${[1, 2].includes(blueprint.number) ? `docs/courses/L${String(blueprint.number).padStart(2, "0")}/行动卡.md` : `docs/courses/tasks/L${String(blueprint.number).padStart(2, "0")}-*.md`}\n实验：${[1, 2].includes(blueprint.number) ? `docs/courses/L${String(blueprint.number).padStart(2, "0")}/` : `docs/courses/labs/L${String(blueprint.number).padStart(2, "0")}/`}\n\n交付首次判断、失败证据、范围内 Diff、复验结果和第二次签字。`, { left: 100, top: 235, width: 1080, height: 330, fontSize: 24, fill: COLORS.white });
+          addBody(slide, `${meta.command}\n\n任务卡：${[1, 2].includes(blueprint.number) ? `docs/courses/L${String(blueprint.number).padStart(2, "0")}/行动卡.md` : `docs/courses/L${String(blueprint.number).padStart(2, "0")}/行动卡.md`}\n实验：${[1, 2].includes(blueprint.number) ? `docs/courses/L${String(blueprint.number).padStart(2, "0")}/` : `docs/courses/labs/L${String(blueprint.number).padStart(2, "0")}/`}\n\n交付首次判断、失败证据、范围内 Diff、复验结果和第二次签字。`, { left: 100, top: 235, width: 1080, height: 330, fontSize: 24, fill: COLORS.white });
           break;
         default:
           throw new Error(`Unhandled page ${page.number}`);

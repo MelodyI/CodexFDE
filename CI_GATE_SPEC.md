@@ -33,4 +33,4 @@
 
 ## 完成定义
 
-`python -X utf8 -m workbench.ci_evidence` 与 `python -X utf8 -m unittest tests.test_ci_evidence -v` 通过；Run A/B/C 身份可被同伴独立复算。
+在真实 CI 身份与 Harness 报告均存在时，`python -X utf8 -m workbench.ci_evidence` 成功生成信封；`python -X utf8 -m unittest tests.test_ci_evidence -v` 通过；Run A/B/C 身份可被同伴独立复算。本地缺少 CI 身份时应拒绝生成，不为得到绿灯伪造运行身份。

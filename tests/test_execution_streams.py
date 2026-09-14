@@ -4,6 +4,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from workbench.execution import CodexExecutionRunner
 
@@ -20,15 +21,35 @@ class ExecutionStreamTests(unittest.TestCase):
             self.assertEqual(0, result.returncode)
             self.assertEqual(prompt, result.stdout)
 
-    def invoke(self, code, timeout=10):
+    def invoke(self, code, timeout=30, *, after_partial_ready=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runner = CodexExecutionRunner(root, root)
             lines = []
-            start = time.monotonic()
-            result = runner._run_codex_streaming(
-                [sys.executable, '-u', '-c', code], '', timeout, lines.append, start)
-            return result, lines, time.monotonic() - start
+            real_clock = time.monotonic
+            start = real_clock()
+            ready = root / 'partial-ready'
+            armed_at = None
+            if after_partial_ready:
+                code = code.replace('time.sleep(30)', f"open({str(ready)!r}, 'w').close();time.sleep(30)")
+
+            def execution_clock():
+                nonlocal armed_at
+                now = real_clock()
+                if not after_partial_ready:
+                    return now
+                if armed_at is None and ready.exists():
+                    armed_at = now
+                # Bound startup separately; only the partial-line case needs the
+                # child to have emitted bytes before testing their preservation.
+                if armed_at is None:
+                    return start + timeout + 1 if now - start > 30 else start
+                return start + now - armed_at
+
+            with patch('workbench.execution.time.monotonic', side_effect=execution_clock):
+                result = runner._run_codex_streaming(
+                    [sys.executable, '-u', '-c', code], '', timeout, lines.append, start)
+            return result, lines, real_clock() - (armed_at if armed_at is not None else start)
 
     def test_silent_process_cannot_bypass_timeout(self):
         result, _, elapsed = self.invoke('import time; time.sleep(30)', timeout=.3)
@@ -36,12 +57,13 @@ class ExecutionStreamTests(unittest.TestCase):
         self.assertLess(elapsed, 5)
 
     def test_partial_line_cannot_bypass_timeout_and_is_preserved(self):
-        # Allow the Windows ownership guard and child interpreter to start;
-        # the child's 30-second sleep must still be interrupted on deadline.
-        result, _, elapsed = self.invoke("import sys,time;sys.stdout.write('partial');sys.stdout.flush();time.sleep(30)", timeout=5)
+        # Synchronize on the flushed bytes, not a guess about Windows startup speed.
+        # The silent-process test separately enforces the deadline from launch.
+        result, _, elapsed = self.invoke("import sys,time;sys.stdout.write('partial');sys.stdout.flush();time.sleep(30)",
+                                         timeout=.3, after_partial_ready=True)
         self.assertEqual(124, result.returncode)
         self.assertIn('partial', result.stdout)
-        self.assertLess(elapsed, 8)
+        self.assertLess(elapsed, 5)
 
     def test_full_stderr_is_drained_while_stdout_events_are_delivered(self):
         result, lines, _ = self.invoke("import sys;sys.stderr.write('x'*200000);sys.stderr.flush();print('done')")

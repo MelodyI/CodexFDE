@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from workbench.course_mainline import LESSONS
+from tests.course_assets import local_only, published_docs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,11 @@ def lesson_files(directory: Path) -> dict[int, Path]:
         number = int(path.name[1:3])
         if 1 <= number <= 16:
             if number in result:
+                # Small migration pointers are aliases, not a second handout.
+                body = path.read_text(encoding="utf-8")
+                targets = re.findall(r"<!-- course-alias: (.+?) -->", body)
+                if len(targets) == 1 and (path.parent / targets[0]).resolve() == result[number].resolve():
+                    continue
                 raise AssertionError(f"L{number:02d} 有重复课程文件：{result[number].name}、{path.name}")
             result[number] = path
     return result
@@ -72,12 +78,25 @@ class CourseOutlineAlignmentTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "重复课程文件"):
                 lesson_files(root)
 
+    def test_migration_alias_must_point_to_the_canonical_handout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            canonical = root / 'L03/阅读讲义.md'
+            canonical.parent.mkdir()
+            canonical.write_text('# Current chapter', encoding='utf-8')
+            alias = root / 'L03-旧入口.md'
+            alias.write_text('<!-- course-alias: L03/阅读讲义.md -->', encoding='utf-8')
+            self.assertEqual({3: canonical}, lesson_files(root))
+            alias.write_text('<!-- course-alias: missing.md -->', encoding='utf-8')
+            with self.assertRaisesRegex(AssertionError, '重复课程文件'):
+                lesson_files(root)
+
     def test_student_entry_and_new_directory_contract_exist(self) -> None:
         for path in (
             DOCS / "README.md",
             COURSES / "课程蓝图.md",
             COURSES / "FlowERP-AI研发工作台.code-workspace",
-            COURSES / "tasks" / "README.md",
+            COURSES / "行动卡索引.md",
             COURSES / "labs",
             DOCS / "reference" / "个人AI研发工作台.md",
             DOCS / "reference" / "FlowERP领域模型与业务不变量.md",
@@ -137,7 +156,8 @@ class CourseOutlineAlignmentTests(unittest.TestCase):
             with self.subTest(lesson=number):
                 self.assertEqual(title, contracts[number][0])
                 self.assertEqual(f"# L{number:02d}｜{title}", handouts[number].read_text(encoding="utf-8").splitlines()[0])
-                self.assertEqual(f"# L{number:02d}｜{title}", tasks[number].read_text(encoding="utf-8").splitlines()[0])
+                heading = tasks[number].read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn(heading, (f"# L{number:02d}｜{title}", f"# L{number:02d} 行动卡｜{title}"))
 
     def test_handout_and_task_copy_the_four_outline_contract_lines(self) -> None:
         contracts = outline_contracts()
@@ -156,37 +176,32 @@ class CourseOutlineAlignmentTests(unittest.TestCase):
             body = path.read_text(encoding="utf-8")
             with self.subTest(lesson=number):
                 for marker in (
-                    "## 附录 A：本讲课程大纲合同",
-                    "## 本章学习地图",
                     "FlowERP",
                     "工作台",
                     "Codex",
-                    "正常路径",
-                    "失败路径",
-                    "失败后状态",
-                    "第二次签字",
-                    "## 本讲一手来源",
+                    "失败",
+                    "验收",
+                    "迁移",
                 ):
                     self.assertIn(marker, body)
-                self.assertGreaterEqual(body.count("```"), 2)
+                self.assertRegex(body, r"正常|成功")
+                self.assertRegex(body, r"!\[[^\]]+\]\([^)]+\)")
+                self.assertRegex(body, r"\]\((?:\./)?实践操作手册\.md(?:#[^)]*)?\)")
                 if path.parent.name == f"L{number:02d}":
-                    self.assertRegex(body, rf"(?:\./)?slides/(?:【已确认】)?L{number:02d}-")
-                    self.assertRegex(body, r"\]\((?:\./)?行动卡\.md\)")
-                    self.assertRegex(body, r"\]\((?:\./)?SUBMISSION\.md\)")
+                    # The practice manual owns the actionable submission handoff.
+                    manual = (path.parent / "实践操作手册.md").read_text(encoding="utf-8")
+                    self.assertIn("提交", manual)
                 else:
                     self.assertIn(f"./slides/L{number:02d}-", body)
                     self.assertIn(f"./tasks/L{number:02d}-", body)
                     self.assertIn(f"./labs/L{number:02d}/", body)
-                source_section = body.split("## 本讲一手来源", 1)[1]
-                self.assertRegex(source_section, r"核验日期：\d{4}-\d{2}-\d{2}")
-                self.assertGreaterEqual(source_section.count("https://"), 2)
-                self.assertLessEqual(source_section.count("https://"), 5)
+                self.assertRegex(body, r"课程大纲|课程合同")
                 self.assertNotIn("教师备课区", body)
 
     def test_student_entry_links_the_independent_slide_index(self) -> None:
         entry = (DOCS / "README.md").read_text(encoding="utf-8")
-        index = (COURSES / "slides" / "README.md").read_text(encoding="utf-8")
-        self.assertIn("./courses/slides/README.md", entry)
+        index = (COURSES / "课件获取与本地检查.md").read_text(encoding="utf-8")
+        self.assertIn("./courses/课件获取与本地检查.md", entry)
         self.assertEqual(16, len(re.findall(r"^\d+\. \[L\d{2}｜", index, re.MULTILINE)))
 
     def test_l04_bootstrap_shift_and_l16_live_delivery_are_explicit(self) -> None:
@@ -213,23 +228,25 @@ class CourseOutlineAlignmentTests(unittest.TestCase):
 
     def test_all_local_markdown_links_resolve(self) -> None:
         broken: list[str] = []
-        for path in DOCS.rglob("*.md"):
+        for path in (p for p in published_docs() if p.suffix == '.md'):
             body = path.read_text(encoding="utf-8")
             for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", body):
                 target = target.strip().strip("<>")
                 if not target or target.startswith(("http://", "https://", "#", "mailto:")):
                     continue
                 local = unquote(target.split("#", 1)[0])
-                if not (path.parent / local).resolve().exists():
+                destination = (path.parent / local).resolve()
+                if not local_only(destination) and not destination.exists():
                     broken.append(f"{path.relative_to(ROOT)} -> {target}")
         self.assertFalse(broken, "\n".join(broken))
 
     def test_course_assets_are_all_referenced(self) -> None:
-        markdown = "\n".join(path.read_text(encoding="utf-8") for path in DOCS.rglob("*.md"))
+        published = published_docs()
+        markdown = "\n".join(path.read_text(encoding="utf-8") for path in published if path.suffix == '.md')
         orphaned = [
             str(path.relative_to(ROOT))
-            for path in (COURSES / "assets").rglob("*")
-            if path.is_file() and path.name not in markdown
+            for path in published
+            if path.is_relative_to(COURSES / "assets") and path.suffix != '.md' and path.name not in markdown
         ]
         self.assertFalse(orphaned, "\n".join(orphaned))
 

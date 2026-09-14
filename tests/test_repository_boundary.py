@@ -1,6 +1,8 @@
 """Controller imports, external process dispatch, and candidate failure isolation."""
 import ast
+from contextlib import closing
 import os
+import sqlite3
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +15,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryBoundaryTests(unittest.TestCase):
+    def test_resolving_registered_customer_does_not_initialize_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            product = root / 'product'
+            (product / 'flowerp').mkdir(parents=True)
+            (product / 'flowerp/server.py').touch()
+            database = root / 'workbench.db'
+            with closing(sqlite3.connect(database)) as conn, conn:
+                conn.execute('CREATE TABLE harness_projects (root_path TEXT)')
+                conn.execute('INSERT INTO harness_projects VALUES (?)', (str(product),))
+            before = database.read_bytes()
+            with patch.dict(os.environ, {'FLOWERP_PROJECT_ROOT': ''}), \
+                 patch('workbench.runtime_paths.service_runtime', return_value=root):
+                self.assertEqual(product.resolve(), external_project.flowerp_root())
+            self.assertEqual(before, database.read_bytes())
+            with closing(sqlite3.connect(database)) as conn, conn:
+                conn.execute('DROP TABLE harness_projects')
+            before = database.read_bytes()
+            with patch.dict(os.environ, {'FLOWERP_PROJECT_ROOT': ''}), \
+                 patch('workbench.runtime_paths.service_runtime', return_value=root):
+                with self.assertRaisesRegex(ValueError, '添加独立 FlowERP'):
+                    external_project.flowerp_root()
+            self.assertEqual(before, database.read_bytes())
+
     def test_legacy_serve_preserves_saved_data_and_normalizes_explicit_paths(self):
         from workbench.cli import main
         with patch('workbench.runtime_paths.service_runtime', return_value=Path('/retained')) as runtime, \
@@ -29,7 +55,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
     def test_controller_has_no_in_process_erp_imports_or_source(self):
         self.assertFalse((ROOT / 'flowerp').exists())
         self.assertFalse((ROOT / 'web').exists())
-        for directory in ('workbench', 'eval', 'agent'):
+        for directory in ('workbench', 'eval', 'agent', 'scripts'):
             for path in (ROOT / directory).rglob('*.py'):
                 for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
                     names = ([node.module or ''] if isinstance(node, ast.ImportFrom)

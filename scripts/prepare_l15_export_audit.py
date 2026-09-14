@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from workbench.course_snapshot import prepare_source_snapshot
@@ -50,6 +51,25 @@ def inventory_empty_export_retains_schema() -> str:
 '''
 
 
+def validate_initial_failure(report, returncode):
+    """A pre-existing feature or an environment error is not the teaching defect."""
+    rows = report.get('results', [])
+    if len(rows) != 1 or rows[0].get('name') != 'inventory_empty_export_retains_schema':
+        raise ValueError('新增验收报告不完整，保留现场并停止准备')
+    row = rows[0]
+    if row.get('passed') is True:
+        raise ValueError('当前候选已经通过新增验收，请选择尚未实现的需求；不能伪造起始缺陷')
+    error = row.get('error') or {}
+    message = str(error.get('message') or '').strip()
+    expected = '空库存导出必须保留列名'
+    if (returncode != 1 or row.get('passed') is not False or row.get('level') != 'blocking'
+            or report.get('summary', {}).get('blocking_failed') != 1
+            or report.get('summary', {}).get('decision') != 'block'
+            or error.get('type') != 'AssertionError'
+            or not (message == expected or message.endswith('\nAssertionError: ' + expected))):
+        raise ValueError('起始失败不是空库存列名缺陷，保留报告并先排除环境或检查错误')
+
+
 def prepare(repository, runtime):
     runtime = Path(runtime).resolve()
     if runtime.exists():
@@ -60,8 +80,13 @@ def prepare(repository, runtime):
         return subprocess.run(['git', *args], cwd=root, check=True, text=True,
                               encoding='utf-8', capture_output=True).stdout.strip()
     git('tag', 'course/l15-start', snapshot['snapshot_commit'])
+    product_cases = root / 'eval/erp_cases.py'
+    if not product_cases.is_file():
+        raise ValueError('隔离候选缺少 FlowERP 检查，不能向工作台 Eval 注入业务导入')
+    product_cases.write_text(product_cases.read_text(encoding='utf-8') + CASE, encoding='utf-8', newline='\n')
     cases = root / 'eval/cases.py'
-    cases.write_text(cases.read_text(encoding='utf-8') + CASE, encoding='utf-8', newline='\n')
+    adapter = '\ndef inventory_empty_export_retains_schema():\n    from workbench.external_project import evaluate_case\n    return evaluate_case("inventory_empty_export_retains_schema")\n'
+    cases.write_text(cases.read_text(encoding='utf-8') + adapter, encoding='utf-8', newline='\n')
     harness = root / 'eval/harness.py'
     text = harness.read_text(encoding='utf-8')
     marker = 'EVALS: list[tuple[str, str, Callable[[], str]]] = ['
@@ -69,13 +94,23 @@ def prepare(repository, runtime):
         raise ValueError('Eval 注册入口已变化')
     text = text.replace(marker, marker + '\n    ("inventory_empty_export_retains_schema", "blocking", cases.inventory_empty_export_retains_schema),')
     harness.write_text(text, encoding='utf-8', newline='\n')
-    git('add', 'eval/cases.py', 'eval/harness.py')
+    git('add', 'eval/cases.py', 'eval/erp_cases.py', 'eval/harness.py')
     git('-c', 'user.name=Maintainer rehearsal', '-c', 'user.email=rehearsal@localhost',
         '-c', 'commit.gpgsign=false', 'commit', '-m', 'Local rehearsal: add empty inventory export acceptance')
+    report_path = runtime / 'initial-export-eval.json'
+    initial = subprocess.run([sys.executable, '-X', 'utf8', '-m', 'eval.harness',
+                              '--suite', 'blocking', '--case', 'inventory_empty_export_retains_schema',
+                              '--report-path', str(report_path)], cwd=root,
+                             capture_output=True, text=True, encoding='utf-8', timeout=180)
+    (runtime / 'initial-export-eval.log').write_text(initial.stdout + '\n' + initial.stderr, encoding='utf-8')
+    if not report_path.is_file():
+        raise ValueError('新增验收未生成报告，不能把命令错误记为起始缺陷')
+    validate_initial_failure(json.loads(report_path.read_text(encoding='utf-8')), initial.returncode)
     payload = {'repository':str(root), 'runtime':str(runtime), 'baseline_commit':snapshot['snapshot_commit'],
                'session_commit':git('rev-parse','HEAD'), 'new_case':'inventory_empty_export_retains_schema',
                'student_achievement':False, 'human_feedback_approval':False, 'published_course_baseline':False,
-               'eval_sha256':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in (cases,harness)}}
+               'initial_report':str(report_path), 'initial_exit_code':initial.returncode,
+               'eval_sha256':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in (cases,product_cases,harness)}}
     (runtime / 'preparation.json').write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf-8')
     spec = '''## 来源
 维护者实际观察：空库存调用 ImportExportService.export_csv(..., "inventory") 返回空字符串。

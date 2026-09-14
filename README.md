@@ -33,7 +33,7 @@ FDE 指 **Forward-Deployed Engineering**：贴近用户、数据和运行后果�
 
 | 仓库 | 维护内容 | 使用方式 |
 |---|---|---|
-| CodexFDE（本仓库） | 个人研发工作台、交付治理、课程参考实现；课程材料按现有约定仅保留本地 | 从工作台首页添加项目，在“事项与决策”中组织交付 |
+| CodexFDE（本仓库） | 个人研发工作台、交付治理、课程讲义与参考实现 | 从工作台首页添加项目，在“事项与决策”中组织交付 |
 | [FlowERP 独立仓库](https://github.com/congde/flowERP.git) | ERP 业务代码、客户 HTTP API、客户页面与业务测试 | 使用自己的源码目录、虚拟环境和业务数据库，接受工作台组织的受控交付 |
 
 本仓库已移除 `flowerp/`、`web/` 和旧的合并业务 API；业务代码、客户界面和业务测试统一维护在 FlowERP 独立仓库。工作台通过独立进程启动客户服务，通过项目配置运行客户 Eval，不在进程内导入 ERP。旧数据库、已有事项与历史证据保留原归属，不自动迁移。
@@ -120,29 +120,30 @@ python -m venv .venv
 - **产品主线**：FlowERP 如何从主数据逐步增长到库存、订单、采购和可操作 Web。
 - **学习证据**：学生能否留下首次判断、失败、修订、互评和迁移证据。
 
-**课程资料当前仅保留本地。** `docs/` 按仓库现有约定不纳入 Git，新克隆不会包含以下讲义、课件和合同链接的目标文件。课程命令及部分检查需要这些资料，请从课程提供方取得匹配版本；源码提交不等于完整课程材料发布。
+**课程讲义、实践材料与配图随仓库提供。** `docs/` 下的 `slides/` 文件夹、`.pptx` 和教师资料目录按 `.gitignore` 保留在本地。新克隆不包含这些课件；需要课堂 PPT 时，请从课程提供方取得匹配版本。
 
-学生从 [课程资料总入口](docs/README.md) 开始，课堂投影与复习使用 [L01～L16 独立课件](docs/courses/slides/README.md)。对外课程名与 16 讲标题以 [课表｜Codex AI 工程交付行动营](docs/课表｜Codex AI 工程交付行动营.md) 的「主题」列为准，每讲四项内容合同以 [16 讲课程大纲](docs/课程大纲-Codex-FDE行动营-个人研发自动化工作台.md) 为准。基础较弱或尚未配置环境的学员先完成 [L00 课前准备](docs/courses/L00-课前准备-安装工具与通过环境自检.md)及其[行动卡](docs/courses/tasks/L00-课前准备.md)。L00 不计入正式 16 讲，也不产生工作台或 FlowERP 产品增量。
+学生从 [课程资料总入口](docs/README.md) 开始，课堂投影与复习使用 [L01～L16 独立课件](docs/courses/课件获取与本地检查.md)。对外课程名与 16 讲标题以 [课表｜Codex AI 工程交付行动营](docs/课表｜Codex AI 工程交付行动营.md) 的「主题」列为准，每讲四项内容合同以 [16 讲课程大纲](docs/课程大纲-Codex-FDE行动营-个人研发自动化工作台.md) 为准。基础较弱或尚未配置环境的学员先完成 [L00 课前准备](docs/courses/L00/L00｜课前准备：装好工具，跑通第一次环境自检.md)中的操作与自检。L00 不计入正式 16 讲，也不产生工作台或 FlowERP 产品增量。
 
 ## 5 分钟跑起来（本仓库课程参考环境）
 
 ### 1. 准备环境
 
-仓库要求 Python 3.10 或更高版本；课堂统一使用 Python 3.12.x。课程跟跑线默认只使用 Python 标准库和 SQLite，不依赖外部服务。学员跟课请先完成 L00，不要把本节当作 L01 已完成。
+仓库要求 Python 3.10 或更高版本；课堂统一使用 Python 3.11.x，与 L00 一致。CI 另用 Python 3.12 检查兼容性。课程跟跑线默认只使用 Python 标准库和 SQLite，不依赖外部服务。学员跟课请先完成 L00，不要把本节当作 L01 已完成。
 
 实际调用 Codex 修改代码，还需要可用的 Git、Codex CLI 及其模型访问环境。工作台的标准库实现与本地检查不等于模型可以离线运行；请在启动工作台的同一终端确认 CLI 能实际执行任务。
 
 Windows PowerShell：
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\Activate.ps1
 ```
 
 macOS：
 
 ```bash
-python3.12 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
@@ -151,11 +152,18 @@ Linux 可以使用仓库允许的 Python 3.10+，但不作为课堂统一排错�
 
 ### 2. 先验证仓库
 
-本仓库默认阻断 Eval 检查工作台；FlowERP 的业务阻断 Eval 在独立仓库运行。下方 `demo` 是兼容命令，会转交独立 FlowERP 进程，因此需要先配置客户项目。课程中显式选择的 ERP 检查仍保留原用例名，执行目标及退出码进入证据。
+先检查工作台安装，再运行工作台阻断 Eval。这两条命令不要求安装独立 FlowERP。环境检查输出解释器、包来源和页面资源是否齐全；`ok: true` 只证明这些安装项通过。
 
 ```bash
-python -X utf8 -m workbench.cli demo
+python -X utf8 -m workbench.cli environment-check
 python -X utf8 -m eval.harness --suite blocking
+```
+
+按上文准备并登记独立 FlowERP 后，再检查客户环境与演示。`--product` 使用客户仓库自己的 `.venv`；也可用 `--product-root` 明确指定目录。客户业务 Eval 在独立仓库运行，工作台的绿灯不代表客户业务通过。
+
+```bash
+python -X utf8 -m workbench.cli environment-check --product
+python -X utf8 -m workbench.cli demo
 ```
 
 课程跟跑另运行 `python -X utf8 -m workbench.cli course-status`，检查课程合同、Eval 映射和线性标签；`course_ready: true` 只说明课程合同可跟跑，不代表学生已经亲手构造了每讲能力。通用研发执行后端不要求课程标签，但沿用的阻断检查仍可能依赖本地课程合同。
@@ -168,7 +176,7 @@ python -X utf8 -m eval.harness --suite blocking
 
 启动结果中 `started` 表示新启动，`reused` 表示复用已有服务；若端口属于其他服务或不同数据目录，会报错，不会自动切换端口或数据库。通过该入口新启动的工作台启用网页代码执行能力，每次具体执行仍需在网页核对方案并授权；复用服务时保留其原有启动设置。
 
-两个入口及 `workbench.cli serve-workbench`、`workbench.cli serve` 都读取本机 `.runtime/services.json`，当前内容为：
+两个入口及 `workbench.cli serve-workbench`、`workbench.cli serve` 都读取本机 `.runtime/services.json`。下面是 2026-09-06 恢复操作留下的历史配置示例；新安装无需创建它，已有安装应核对自己的文件，不要复制示例覆盖：
 
 ```json
 {
@@ -181,9 +189,9 @@ python -X utf8 -m eval.harness --suite blocking
 
 `main.py --runtime-dir` 只覆盖工作台目录，`--erp-runtime-dir` 只覆盖 ERP 目录；`--port` 指工作台端口，`--erp-port` 指 ERP 端口。这个入口现在启动两个系统，旧的单 ERP 启动方式请使用 `python -m workbench.cli serve`。显式指定目录仍用于隔离实验；日常启动无需手写目录。以下完整路径命令用于排错。
 
-#### 本机已有数据位置与手动排错（2026-09-06 恢复后）
+#### 历史恢复案例与手动排错（仅适用于 2026-09-06 原安装）
 
-在 `D:\work\CodexFDE` 下执行。先检查 8000、8001 是否已有服务；已有服务可访问时直接使用。需要重启时先确认没有执行中的任务，再停止对应服务，保持下列运行目录不变。
+下列路径是该次恢复记录，不是新克隆仓库的默认配置。仅排查原安装时，在 `D:\work\CodexFDE` 下执行。先检查 8000、8001 是否已有服务；已有服务可访问时直接使用。需要重启时先确认没有执行中的任务，再停止对应服务，沿用实际运行目录。
 
 | 服务 | 当前运行目录 | 主数据库 |
 |---|---|---|
@@ -292,7 +300,7 @@ python -X utf8 -m workbench.cli course-contract --lesson 3
 python -X utf8 -m workbench.cli course-spec --lesson 3
 ```
 
-以 L03 为例，详细教学设计见 [把模糊需求变成可验收 Spec](docs/courses/L03-把模糊需求变成可验收Spec.md)，学生行动卡见 [L03 Spec 驱动](docs/courses/tasks/L03-Spec驱动.md)。
+以 L03 为例，详细教学设计见 [把模糊需求变成可验收 Spec](docs/courses/L03/阅读讲义.md)，学生行动卡见 [L03 Spec 驱动](docs/courses/L03/行动卡.md)。
 
 ### 从 L04 起执行真实交付
 
@@ -314,7 +322,7 @@ python -X utf8 -m workbench.cli course-status --require-baselines
 
 当输出中的 `baseline_semantics` 为 `progression_gate` 时，线性标签只是讲师侧的进度门闩；可构造性仍要看隔离工作区中的实际证据。
 
-16 张目标卡、命令卡和验收卡统一收录在 [docs/courses/tasks](docs/courses/tasks/README.md)。
+16 张目标卡、命令卡和验收卡统一收录在 [行动卡索引](docs/courses/行动卡索引.md)。
 
 ## 仓库地图
 
@@ -328,7 +336,7 @@ python -X utf8 -m workbench.cli course-status --require-baselines
 | [FlowERP `web/`](https://github.com/congde/flowERP/tree/main/web) | FlowERP 客户项目界面，默认 8000 |
 | [`harness_web/`](harness_web/) | 可选的完整 Harness 平台界面，默认 8010 |
 | [`docs/courses/slides/`](docs/courses/slides/) | 与极客时间主题逐讲对应的 16 份独立 PPT |
-| [`docs/courses/tasks/`](docs/courses/tasks/) | 16 讲目标卡、命令卡和验收卡 |
+| [`docs/courses/tasks/`](docs/courses/行动卡索引.md) | 16 讲目标卡、命令卡和验收卡 |
 | [`docs/courses/`](docs/courses/) | L00～L16 学生讲义、课程蓝图、任务卡与实验 |
 | [`docs/reference/`](docs/reference/) | 工作台、FlowERP 领域与运行边界参考资料 |
 | [`deploy/`](deploy/) | 容器化、运行与回滚资料 |
@@ -384,7 +392,7 @@ FlowERP 是课程的客户项目、实验场和验收场，不是冻结夹具。
 - 渠道与运营：渠道订单、回调租约、运行状态、备份和健康检查。
 - Web：无密钥的 ERP 操作界面；状态最终落到业务服务和 SQLite。
 
-它是可教学、可验证的单体基线，不应被表述为已经满足所有生产级 ERP 场景。上线差距、容量、高可用和安全边界以 [上线差距与验收矩阵](docs/FlowERP-上线差距与验收矩阵.md) 和 [上线运行手册](docs/FlowERP-上线运行手册.md) 为准。
+它是可教学、可验证的单体基线，不应被表述为已经满足所有生产级 ERP 场景。上线差距、容量、高可用和安全边界以 [上线差距与验收矩阵](https://github.com/congde/flowERP) 和 [上线运行手册](https://github.com/congde/flowERP) 为准。
 
 <details>
 <summary>运营、备份与容器命令</summary>

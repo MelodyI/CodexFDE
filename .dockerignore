@@ -53,3 +53,11 @@
 **/*.pfx
 scripts/presentations
 scripts/presentations/**
+
+# Local course exports are not required by the runtime image.
+docs/**/slides
+docs/**/slides/**
+docs/**/*.pptx
+docs/**/*.docx
+docs/courses/教师资料
+docs/courses/教师资料/**

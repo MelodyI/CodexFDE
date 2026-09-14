@@ -103,7 +103,7 @@ def run_suite(suite: str = "all", write_report: bool = True,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Unified FlowERP evaluation harness")
+    parser = argparse.ArgumentParser(description="工作台统一 Eval；默认只检查工作台，显式业务用例委托独立 FlowERP")
     parser.add_argument("--suite", choices=("all", "blocking", "observing"), default="all")
     parser.add_argument("--case", action="append", default=[], help="只运行指定 Eval，可重复")
     parser.add_argument("--no-report", action="store_true")

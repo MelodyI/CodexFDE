@@ -41,7 +41,8 @@ class InitiativeWorkflowTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.root, self.runtime, self.tasks = self.fixture.root, self.fixture.runtime, self.fixture.tasks
         self.items = InitiativeStore(self.tasks.path)
-        self.item = self.items.create({'title': '改进数值', 'raw_signal': '改进数值', 'source': '自动测试'}, 'owner')
+        self.item = self.items.create({'title': '改进数值', 'raw_signal': '改进数值', 'source': '自动测试',
+                                       'project_id': 'workflow-test-project'}, 'owner')
         self.questions = ['本期目标是什么？']
         self.value = 2
         self.research_sources = []

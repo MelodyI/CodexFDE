@@ -104,7 +104,7 @@ def scaffold_paths() -> list[Path]:
         ROOT / "tests" / "test_progression.py",
         ROOT / "README.md",
         ROOT / "AGENTS.md",
-        ROOT / "course" / "tasks" / "README.md",
+        ROOT / "docs" / "courses" / "讲义阅读导航.md",
         ROOT / "main.py",
         ROOT / "pyproject.toml",
     ]
@@ -112,10 +112,12 @@ def scaffold_paths() -> list[Path]:
         ROOT / "workbench",
         ROOT / "harness_web",
         ROOT / "agent",
-        ROOT / "web",
+        ROOT / "workbench_web",
     ):
         if directory.is_dir():
-            paths.extend(sorted(p for p in directory.rglob("*") if p.is_file()))
+            paths.extend(sorted(p for p in directory.rglob("*") if p.is_file()
+                                and p.suffix in {'.py', '.html', '.css', '.js', '.json', '.md'}
+                                and not set(p.relative_to(directory).parts) & {'__pycache__', '.runtime', 'node_modules'}))
     return paths
 
 

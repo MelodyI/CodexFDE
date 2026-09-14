@@ -1,9 +1,18 @@
 """Create an isolated, labelled purchase scenario for real page reconciliation."""
 import json
-import secrets
 import argparse
+import subprocess
 from pathlib import Path
 
+from workbench.external_project import flowerp_root, python_for
+
+
+# Run the business scenario only in the independent customer's process.
+SCENARIO = r'''
+import json
+import secrets
+import sys
+from pathlib import Path
 from flowerp.identity import IdentityService, SYSTEM_PRINCIPAL
 from flowerp.master_data import MasterDataService
 from flowerp.models import ApprovalRequired
@@ -45,6 +54,24 @@ def prepare(runtime: Path, *, password: str | None = None) -> dict:
                 "rejection_left_stock_unchanged": True}
     (runtime / "scenario.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"runtime": str(runtime.resolve()), "purchase_id": order["id"], "order_number": order["order_number"]}
+
+request = json.load(sys.stdin)
+print(json.dumps(prepare(Path(request['runtime']), password=request.get('password')), ensure_ascii=False))
+'''
+
+
+def prepare(runtime: Path, *, password: str | None = None) -> dict:
+    runtime = Path(runtime).resolve()
+    if (runtime / 'flowerp.db').exists():
+        raise FileExistsError('已有验收库，拒绝覆盖')
+    root = flowerp_root()
+    result = subprocess.run(
+        [python_for(root), '-X', 'utf8', '-c', SCENARIO], cwd=root,
+        input=json.dumps({'runtime': str(runtime), 'password': password}),
+        capture_output=True, text=True, encoding='utf-8', timeout=180)
+    if result.returncode:
+        raise RuntimeError(f'独立 FlowERP 页面验收准备失败（退出码 {result.returncode}）：{result.stderr[-2000:]}')
+    return json.loads(result.stdout)
 
 
 if __name__ == "__main__":

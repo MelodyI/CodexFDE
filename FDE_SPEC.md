@@ -23,7 +23,8 @@
 - 可用库存不得为负。
 - 同一入库幂等键只能生效一次。
 - 订单和采购状态只能走合法迁移。
-- 所有验收通过 `python -X utf8 -m eval.harness --suite blocking` 复验。
+- 工作台质量在 CodexFDE 的 `.venv` 中运行 `python -X utf8 -m eval.harness --suite blocking` 复验。
+- 本 Spec 的库存、订单、采购业务验收须在独立 FlowERP 仓库的 `.venv` 中运行该仓库的阻断 Eval，并补齐本次需求用例。工作台默认绿灯不证明下列业务用例通过；课程显式业务用例也可经进程边界委托给隔离候选复验。
 
 ## 验收用例
 

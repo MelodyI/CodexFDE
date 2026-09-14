@@ -35,6 +35,9 @@ def main() -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     add_bootstrap_commands(sub)
+    environment_cmd = sub.add_parser('environment-check', help='只读检查工作台安装；可选检查独立客户环境')
+    environment_cmd.add_argument('--product', action='store_true', help='同时在独立 FlowERP 解释器中检查包导入')
+    environment_cmd.add_argument('--product-root', type=Path, help='明确指定独立 FlowERP 仓库，同时检查客户环境')
     demo_cmd = sub.add_parser("demo", help="客户项目：跑通一条 FlowERP 演示账本")
     demo_cmd.add_argument("--runtime-dir")
     mock_cmd = sub.add_parser("mock-data", help="客户项目：生成幂等的完整 ERP 验收账套")
@@ -162,6 +165,11 @@ def main() -> int:
     task_list_cmd = sub.add_parser("task-list", help="列出交付任务")
     task_list_cmd.add_argument("--runtime-dir", default=".runtime"); task_list_cmd.add_argument("--limit", type=int, default=30)
     args = parser.parse_args()
+    if args.command == 'environment-check':
+        from .environment_check import check_environment
+        report = check_environment(product=args.product, product_root=args.product_root)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0 if report['ok'] else 1
     if args.command in {'serve','demo','mock-data','verify-mock-data','init','backup','verify-backup','doctor','runtime-status','maintenance'}:
         from .external_project import run
         arguments = list(sys.argv[1:])

@@ -1,7 +1,9 @@
 """Process boundary for the independent FlowERP repository."""
 import json
 import os
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 
@@ -13,10 +15,18 @@ def flowerp_root(explicit=None):
     if value:
         root = Path(value).resolve()
     else:
-        from .project_store import ProjectStore
         from .runtime_paths import service_runtime
         database = service_runtime('workbench', root=ROOT) / 'workbench.db'
-        projects = ProjectStore(database).list() if database.is_file() else []
+        projects = []
+        if database.is_file():
+            try:
+                # Resolving a customer must not initialize or migrate the workbench DB.
+                with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+                    connection.row_factory = sqlite3.Row
+                    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='harness_projects'").fetchone():
+                        projects = connection.execute('SELECT root_path FROM harness_projects').fetchall()
+            except sqlite3.Error as error:
+                raise ValueError(f'无法读取工作台项目登记：{error}') from error
         matches = [Path(p['root_path']).resolve() for p in projects
                    if Path(p['root_path']).resolve() != ROOT and (Path(p['root_path']) / 'flowerp/server.py').is_file()]
         if len(matches) != 1:

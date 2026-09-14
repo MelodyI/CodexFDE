@@ -92,7 +92,10 @@ def main() -> None:
         paths = [path for path in sorted(directory.glob("L??-*.md")) if not path.name.endswith("-教师备课说明.md")]
         paths.extend(path for number in range(1, 17) if (path := ROOT / f"docs/courses/L{number:02d}" / ("行动卡.md" if directory.name == "tasks" else "阅读讲义.md")).is_file())
         for path in paths:
-            lesson = int(path.parent.name[1:]) if path.parent.name in ("L01", "L02") else int(path.name[1:3])
+            match = re.fullmatch(r'L(\d{2})', path.parent.name) or re.match(r'L(\d{2})-', path.name)
+            if not match:
+                continue
+            lesson = int(match.group(1))
             if lesson not in contracts:
                 continue
             title, contract_lines = contracts[lesson]

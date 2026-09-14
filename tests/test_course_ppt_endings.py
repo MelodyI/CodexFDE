@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import os
 import unittest
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
@@ -32,12 +33,14 @@ def last_slide_text(path: Path) -> str:
         return "\n".join(node.text or "" for node in slide.findall(f".//{{{A_NS}}}t"))
 
 
+@unittest.skipUnless(os.environ.get('CODEXFDE_VALIDATE_LOCAL_SLIDES') == '1',
+                     'PPT 不随 Git 发布；显式启用本地课件检查')
 class CoursePptEndingTests(unittest.TestCase):
     def test_l03_to_l16_end_with_summary_questions_and_transition(self):
         for number in range(3, 17):
             lesson = f"L{number:02d}"
             decks = list((COURSES / lesson / "slides").glob("*.pptx"))
-            self.assertEqual(len(decks), 1, f"{lesson} 应只有一份正式 PPT")
+            self.assertEqual(len(decks), 1, f"{lesson} 请先明确一份待验收正式 PPT；多版本不能自动择一")
             text = last_slide_text(decks[0])
             with self.subTest(lesson=lesson):
                 self.assertIn("课程总结", text)
