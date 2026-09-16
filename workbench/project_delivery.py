@@ -34,7 +34,11 @@ class CandidateProjectEval:
 
     def __call__(self, suite='blocking', write_report=True):
         from .execution_control import checkpoint
+        from .daily_delivery import manifest
+        from .eval_harness import fingerprint, validate_project_report
+        import hashlib
         checkpoint()
+        before = manifest(self.workspace, self.runtime)
         folder = self.runtime / 'project-reports' / self.task_id / secrets.token_hex(12)
         folder.mkdir(parents=True)
         report_path = folder / 'report.json'
@@ -48,15 +52,15 @@ class CandidateProjectEval:
             'returncode': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr}, ensure_ascii=False), encoding='utf-8')
         checkpoint()
         report = json.loads(report_path.read_text(encoding='utf-8') if report_path.exists() else result.stdout)
-        summary = report.get('summary', {})
-        if summary.get('decision') not in {'pass', 'block'}:
-            raise RuntimeError('项目 Eval 报告缺少 pass/block 决策')
-        if (result.returncode == 0) != (summary['decision'] == 'pass'):
-            raise RuntimeError('项目 Eval 退出码与报告结论不一致')
-        if summary['decision'] == 'pass' and (summary.get('blocking_failed', 0) or
-                any(r.get('level') == 'blocking' and r.get('passed') is not True for r in report.get('results', []))):
-            raise RuntimeError('项目 Eval 报告包含失败，不能声明通过')
+        # Preserve the exact received report even when validation rejects it.
+        (folder / 'raw-report.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
+        validate_project_report(report, result.returncode)
+        if before != manifest(self.workspace, self.runtime):
+            raise RuntimeError('项目 Eval 执行期间候选源码变化，结果不可用于验收')
         report['runner'] = {'workspace': str(self.workspace), 'process_returncode': result.returncode,
-                            'validated': True, 'label': self.label, 'report_path': str(report_path)}
+                            'validated': True, 'label': self.label, 'report_path': str(report_path),
+                            'candidate_sha256': fingerprint(before), 'command': command,
+                            'process_path': str(folder / 'process.json')}
         report_path.write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
+        report['report_sha256'] = hashlib.sha256(report_path.read_bytes()).hexdigest()
         return report
