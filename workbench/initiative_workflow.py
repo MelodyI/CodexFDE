@@ -341,7 +341,29 @@ class InitiativeWorkflow:
             data['eval_harness']['can_run'] = bool(self.enabled and not data.get('v0') and
                 data['stage'] in {'review', 'rework'} and data.get('workspace') and
                 ((data.get('plan') or {}).get('project') or {}).get('eval_command'))
+        from .quality_hook import view as hook_view
+        data['quality_hook'] = hook_view(data.get('hook_package'), data.get('workspace'), data.get('active_task_id'))
+        data['quality_hook']['can_prepare'] = bool(not data.get('v0') and
+            data['stage'] in {'review', 'rework'} and data.get('workspace') and data.get('active_task_id') and
+            ((data.get('plan') or {}).get('project') or {}).get('eval_command'))
         return data
+
+    def prepare_hook(self, item_id, actor, revision):
+        from .quality_hook import prepare
+        actor = self.actor(actor)
+        with self.lock:
+            data = self._load(item_id)
+            self._check(data, revision, {'review', 'rework'})
+            project = (data.get('plan') or {}).get('project')
+            if data.get('v0') or not project or not data.get('workspace') or not data.get('active_task_id'):
+                raise ValueError('请先形成项目候选及已确认的检查命令')
+            package = prepare(self.runtime, data['workspace'], project, data['active_task_id'], item_id, actor)
+            data['hook_package'] = package
+            data.setdefault('hook_packages', []).append(package)
+            self._event(data, 'user', '准备候选 Stop Hook 待审文件；尚未安装或信任', actor=actor,
+                        task_id=data['active_task_id'], package_path=package['path'])
+            self._save(data)
+        return self.get(item_id)
 
     def run_eval(self, item_id, actor, revision):
         """Re-run the confirmed command without invoking Codex or accepting a task."""

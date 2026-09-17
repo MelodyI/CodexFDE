@@ -127,6 +127,17 @@
 <details><summary>本次命令、报告与来源</summary><pre id="iw-eval-provenance"></pre></details>
 <details><summary>本事项复验历史</summary><ul id="iw-eval-history"></ul></details>
 </section>
+<section id="iw-quality-hook" aria-label="Stop Hook 检查连接">
+<h3>Stop Hook · 结束前自动检查</h3>
+<p id="iw-hook-status" role="status"></p>
+<p class="hint">沿用本事项已确认的项目质量检查命令，在当前候选运行。准备文件不会安装或启用 Hook。</p>
+<button id="iw-hook-prepare" class="secondary" type="button">准备候选 Hook</button>
+<p id="iw-hook-next" class="hint"></p>
+<details><summary>待审文件、候选与命令</summary><pre id="iw-hook-files"></pre></details>
+<details><summary>审查配置与处理器内容</summary><pre id="iw-hook-source"></pre></details>
+<details><summary>最近调用记录</summary><ul id="iw-hook-runs"></ul></details>
+<p class="hint">信任状态须在候选目录的 Codex /hooks 中核对。收到 Stop 输入不等于已证实宿主自动触发；重入跳过也不等于检查通过。</p>
+</section>
 <label for="iw-note">验收依据</label><textarea id="iw-note" rows="2" placeholder="说明核对了什么，以及结果是否满足本期需求"></textarea>
 <button id="iw-accept" class="primary" type="button">接受本轮候选</button>
 <p id="iw-integration-help" hidden>确认集成将把已验收的累计改动写回当前项目源码。工作台会核对起点并备份原文件；不会自动提交 Git 或部署。</p>

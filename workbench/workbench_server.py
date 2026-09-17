@@ -383,6 +383,8 @@ def make_handler(app: WorkbenchApp):
                             return self._json(202, service.execute(item_id, actor, revision))
                         if action == 'eval':
                             return self._json(202, service.run_eval(item_id, actor, revision))
+                        if action == 'prepare-hook':
+                            return self._json(200, service.prepare_hook(item_id, actor, revision))
                         if action == 'accept':
                             return self._json(200, service.accept(item_id, actor, revision, body.get('note')))
                         if action == 'integrate':
