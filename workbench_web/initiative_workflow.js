@@ -35,6 +35,10 @@ function renderIwAnswers(data, busy) {
 }
 function renderInitiativeWork(data) {
   renderEvalHarness(data);
+  const ci=data.ci_evidence || {status:'missing',history:[]};
+  iw('ci-status').textContent=ci.status==='verified' ? '已核验真实 CI 证据；仍需人工验收。' : '尚未登记可回查的真实 CI 证据。';
+  iw('ci-record').disabled=initiativeWorkPending || !ci.can_record;
+  iw('ci-detail').textContent=JSON.stringify({latest:ci.latest || null,history:ci.history || []},null,2);
   renderQualityHook(data);
   if(typeof renderLearning==='function')renderLearning(data);
   if(initiativeWork && initiativeWork.active_task_id!==data.active_task_id) {
@@ -175,6 +179,15 @@ async function initiativeWorkAction(action, extra={}) {
 }
 function initInitiativeWork() {
   iw('eval-run').onclick=()=>initiativeWorkAction('eval');
+  iw('ci-record').onclick=async()=>{
+    const report=iw('ci-report').files[0], envelope=iw('ci-envelope').files[0];
+    if(!report || !envelope){iw('error').textContent='请选择同一次 Run 的 Harness 报告和 Evidence Envelope。';return;}
+    try {
+      const envelopeData=JSON.parse(await envelope.text());
+      await initiativeWorkAction('ci-evidence',{fields:{report_text:await report.text(),envelope:envelopeData,
+        run_url:iw('ci-run-url').value.trim(),candidate_sha:iw('ci-sha').value.trim(),job_conclusion:iw('ci-conclusion').value}});
+    } catch(error) { iw('error').textContent='CI 证据读取失败：'+error.message; }
+  };
   iw('hook-prepare').onclick=()=>initiativeWorkAction('prepare-hook');
   if(typeof initLearning==='function')initLearning();
   document.getElementById('v0-submit').onclick=async()=>{

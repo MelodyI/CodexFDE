@@ -346,6 +346,10 @@ class InitiativeWorkflow:
         data['quality_hook']['can_prepare'] = bool(not data.get('v0') and
             data['stage'] in {'review', 'rework'} and data.get('workspace') and data.get('active_task_id') and
             ((data.get('plan') or {}).get('project') or {}).get('eval_command'))
+        from .ci_review import view as ci_view
+        data['ci_evidence'] = ci_view(data.get('ci_evidence_runs'))
+        data['ci_evidence']['can_record'] = bool(data.get('active_task_id') and
+                                                 data['stage'] in {'review', 'rework'})
         return data
 
     def prepare_hook(self, item_id, actor, revision):
@@ -380,6 +384,28 @@ class InitiativeWorkflow:
             data.update(stage='checking', error='')
             self._event(data, 'user', '运行候选 Eval Harness，保留原报告', actor=actor)
             self._launch(data, self._run_eval, actor, prior, list(command))
+        return self.get(item_id)
+
+    def record_ci_evidence(self, item_id, actor, revision, fields):
+        """Verify remote CI identity/report bytes and retain a task-linked record."""
+        from .ci_review import retain
+        actor = self.actor(actor)
+        if not isinstance(fields, dict):
+            raise ValueError('CI 证据格式无效')
+        with self.lock:
+            data = self._load(item_id)
+            self._check(data, revision, {'review', 'rework'})
+            if not data.get('active_task_id'):
+                raise ValueError('当前事项没有可绑定的交付候选')
+            record = retain(self.runtime, data['active_task_id'], fields.get('report_text'),
+                fields.get('envelope'), run_url=fields.get('run_url'),
+                job_conclusion=fields.get('job_conclusion'), candidate_sha=fields.get('candidate_sha'), actor=actor)
+            data.setdefault('ci_evidence_runs', []).append(record)
+            self.tasks.append_event(data['active_task_id'], 'CI 独立复验证据已核验', actor=actor,
+                evidence={k: v for k, v in record.items() if k != 'artifacts'})
+            self._event(data, 'user', '核验 CI 独立复验：' + record['job_conclusion'], actor=actor,
+                        task_id=data['active_task_id'], run_id=record['run_id'])
+            self._save(data)
         return self.get(item_id)
 
     def _run_eval(self, item_id, actor, prior, command):

@@ -127,6 +127,18 @@
 <details><summary>本次命令、报告与来源</summary><pre id="iw-eval-provenance"></pre></details>
 <details><summary>本事项复验历史</summary><ul id="iw-eval-history"></ul></details>
 </section>
+<section id="iw-ci-evidence" aria-label="CI 独立复验证据">
+<h3>CI · 独立复验与证据信封</h3>
+<p id="iw-ci-status" role="status"></p>
+<p class="hint">上传同一次 Run 的原始 Harness 报告与 Evidence Envelope。工作台核对候选、Run 身份、报告哈希以及失败是否如实影响 Job；通过仍需具名验收。</p>
+<label>Run 链接<input id="iw-ci-run-url" type="url" placeholder="https://github.com/.../actions/runs/..."></label>
+<label>实际 checkout SHA<input id="iw-ci-sha" maxlength="200"></label>
+<label>Job 结论<select id="iw-ci-conclusion"><option value="success">success（绿色）</option><option value="failure">failure（红色）</option></select></label>
+<label>Harness 原始报告<input id="iw-ci-report" type="file" accept="application/json,.json"></label>
+<label>Evidence Envelope<input id="iw-ci-envelope" type="file" accept="application/json,.json"></label>
+<button id="iw-ci-record" class="secondary" type="button">核验并保存本次 CI 证据</button>
+<details><summary>最近一次核验与历史</summary><pre id="iw-ci-detail"></pre></details>
+</section>
 <section id="iw-quality-hook" aria-label="Stop Hook 检查连接">
 <h3>Stop Hook · 结束前自动检查</h3>
 <p id="iw-hook-status" role="status"></p>
