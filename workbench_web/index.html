@@ -127,6 +127,15 @@
 <details><summary>本次命令、报告与来源</summary><pre id="iw-eval-provenance"></pre></details>
 <details><summary>本事项复验历史</summary><ul id="iw-eval-history"></ul></details>
 </section>
+<section id="iw-repair-loop" aria-label="有界修复 Loop">
+<h3>Loop · 有停止条件的返工</h3>
+<p id="iw-loop-status" role="status"></p>
+<p class="hint">检查 → 判断继续或停止 → 有界修改 → 下一轮复验。检查次数与修改次数分开；末轮修改未经复验不能写成收敛。</p>
+<div class="loop-config-grid"><label>最多轮数<input id="iw-loop-rounds" type="number" min="1" max="3" value="3"></label><label>时间预算（秒）<input id="iw-loop-time" type="number" min="1" value="900"></label><label>Token 预算<input id="iw-loop-tokens" type="number" min="1" value="30000"></label></div>
+<label><input id="iw-loop-enabled" type="checkbox"> 对后续返工启用停止闸门</label>
+<button id="iw-loop-save" class="secondary" type="button">保存 Loop 边界</button>
+<details><summary>Loop History 与失败 handoff</summary><pre id="iw-loop-detail"></pre></details>
+</section>
 <section id="iw-ci-evidence" aria-label="CI 独立复验证据">
 <h3>CI · 独立复验与证据信封</h3>
 <p id="iw-ci-status" role="status"></p>

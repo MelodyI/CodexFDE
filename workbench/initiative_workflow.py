@@ -341,6 +341,8 @@ class InitiativeWorkflow:
             data['eval_harness']['can_run'] = bool(self.enabled and not data.get('v0') and
                 data['stage'] in {'review', 'rework'} and data.get('workspace') and
                 ((data.get('plan') or {}).get('project') or {}).get('eval_command'))
+        from .repair_loop import project as loop_project
+        data['repair_loop'] = loop_project(data.get('repair_loop_config'), data.get('iterations', []), self.tasks)
         from .quality_hook import view as hook_view
         data['quality_hook'] = hook_view(data.get('hook_package'), data.get('workspace'), data.get('active_task_id'))
         data['quality_hook']['can_prepare'] = bool(not data.get('v0') and
@@ -351,6 +353,20 @@ class InitiativeWorkflow:
         data['ci_evidence']['can_record'] = bool(data.get('active_task_id') and
                                                  data['stage'] in {'review', 'rework'})
         return data
+
+    def configure_loop(self, item_id, actor, revision, fields):
+        """Freeze L10 bounds for subsequent rework rounds on this initiative."""
+        from .repair_loop import validate_config
+        actor = self.actor(actor)
+        with self.lock:
+            data = self._load(item_id)
+            self._check(data, revision, {'idle', 'clarifying', 'ready', 'confirmed', 'review', 'rework',
+                                        'failed', 'interrupted', 'cancelled'})
+            config = validate_config(fields)
+            data['repair_loop_config'] = config
+            self._event(data, 'user', '保存有界修复 Loop：最多 {max_rounds} 轮，时间 {time_budget_seconds} 秒，Token {token_budget}'.format(**config), actor=actor)
+            self._save(data)
+        return self.get(item_id)
 
     def prepare_hook(self, item_id, actor, revision):
         from .quality_hook import prepare
@@ -536,6 +552,11 @@ class InitiativeWorkflow:
         with self.lock:
             data = self._load(item_id)
             self._check(data, revision, {'idle', 'clarifying', 'ready', 'confirmed', 'review', 'rework', 'failed', 'interrupted', 'cancelled', 'accepted'})
+            if data['stage'] == 'rework' and (data.get('repair_loop_config') or {}).get('enabled'):
+                from .repair_loop import project as loop_project
+                loop = loop_project(data['repair_loop_config'], data.get('iterations', []), self.tasks)
+                if not loop['can_continue']:
+                    raise ValueError('Loop 已停止：' + loop['reason'] + '。请先按 handoff 核对证据并由负责人决定。')
             item = self.initiatives.get(item_id)
             if item.get('decision') in {'defer', 'reject', 'stop'}:
                 raise ValueError('事项已暂缓或停止，请先复查决定')
@@ -711,7 +732,8 @@ class InitiativeWorkflow:
                 current = self._load(item_id)
                 current['active_task_id'] = task['id']
                 current['iterations'].append({'task_id': task['id'], 'plan_id': data['plan']['plan_id'],
-                                              'document_version': data['plan'].get('document_version')})
+                                              'document_version': data['plan'].get('document_version'),
+                                              'at': time.time()})
                 self._save(current)
             self.tasks.append_event(task['id'], '网页具名授权日常研发', actor=actor,
                 evidence={'initiative_id': item_id, 'plan_id': data['plan']['plan_id']})

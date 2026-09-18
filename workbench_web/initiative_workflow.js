@@ -35,6 +35,15 @@ function renderIwAnswers(data, busy) {
 }
 function renderInitiativeWork(data) {
   renderEvalHarness(data);
+  const loop=data.repair_loop || {config:{},history:[]};
+  iw('loop-status').textContent=(loop.config.enabled ? '停止闸门已启用 · ' : '当前仅观察，停止闸门未启用 · ')+
+    loop.status+' · '+loop.reason+' · '+loop.rounds+'/'+(loop.config.max_rounds || 3)+' 轮 · Token '+loop.tokens_used+'/'+(loop.config.token_budget || 30000);
+  iw('loop-save').disabled=initiativeWorkPending || ['queued','executing','checking','integrating'].includes(data.stage);
+  if(document.activeElement!==iw('loop-rounds'))iw('loop-rounds').value=loop.config.max_rounds || 3;
+  if(document.activeElement!==iw('loop-time'))iw('loop-time').value=loop.config.time_budget_seconds || 900;
+  if(document.activeElement!==iw('loop-tokens'))iw('loop-tokens').value=loop.config.token_budget || 30000;
+  iw('loop-enabled').checked=!!loop.config.enabled;
+  iw('loop-detail').textContent=JSON.stringify({history:loop.history,remaining_failures:loop.remaining_failures,handoff:loop.handoff},null,2);
   const ci=data.ci_evidence || {status:'missing',history:[]};
   iw('ci-status').textContent=ci.status==='verified' ? '已核验真实 CI 证据；仍需人工验收。' : '尚未登记可回查的真实 CI 证据。';
   iw('ci-record').disabled=initiativeWorkPending || !ci.can_record;
@@ -179,6 +188,8 @@ async function initiativeWorkAction(action, extra={}) {
 }
 function initInitiativeWork() {
   iw('eval-run').onclick=()=>initiativeWorkAction('eval');
+  iw('loop-save').onclick=()=>initiativeWorkAction('loop-config',{fields:{enabled:iw('loop-enabled').checked,
+    max_rounds:Number(iw('loop-rounds').value),time_budget_seconds:Number(iw('loop-time').value),token_budget:Number(iw('loop-tokens').value)}});
   iw('ci-record').onclick=async()=>{
     const report=iw('ci-report').files[0], envelope=iw('ci-envelope').files[0];
     if(!report || !envelope){iw('error').textContent='请选择同一次 Run 的 Harness 报告和 Evidence Envelope。';return;}
