@@ -69,7 +69,7 @@ function renderInitiativeWork(data) {
   iwList('source-files',(check?.files || []).map(f=>({added:'新纳入',removed:'不再纳入',modified:'内容修改'}[f.kind])+ '：'+f.path));
   iw('recheck').hidden=check?.status==='current';
   iw('recheck').disabled=busy || initiativeWorkPending || !data.enabled;
-  iw('project').textContent=data.project ? '项目：'+data.project.name+' · '+data.project.root_path : '项目：FlowERP';
+  iw('project').textContent=data.project ? '项目：'+data.project.name+' · '+data.project.root_path : '项目：尚未关联';
   iw('cancel').hidden=!['researching','queued','executing','checking'].includes(data.stage);
   iw('cancel').disabled=initiativeWorkPending;
   iw('delivery').hidden=!complete;
