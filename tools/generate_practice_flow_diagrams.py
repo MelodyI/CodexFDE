@@ -9,13 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 LESSONS = {
     3: [
-        ("准备文件", "PowerShell", "提交目录"),
-        ("追问需求并作决定", "写作会话 + 你", "decisions.md"),
-        ("写初稿并用反例修订", "写作会话 + 你", "FDE_SPEC.md"),
-        ("抽取通用模板", "练习仓库", "SPEC_TEMPLATE.md"),
-        ("建设最小解析器", "练习仓库", "解析器与测试"),
-        ("用三种输入划边界", "PowerShell", "evidence.md"),
-        ("迁移并交接", "你", "确认版成果"),
+        ("建立本讲目录", "PowerShell", "5 个练习文件"),
+        ("回答需求问题", "Codex + 你", "decisions.md"),
+        ("写合同并消除歧义", "Codex + 你", "v1 与确认版 Spec"),
+        ("抽取通用模板", "练习仓库", "模板与采购迁移稿"),
+        ("建设结构解析器", "练习仓库", "解析器与测试"),
+        ("用三份合同复验", "PowerShell + 你", "evidence.md"),
     ],
     4: [
         ("准备本讲记录", "PowerShell", "lesson-04-submission"),
