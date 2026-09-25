@@ -7,9 +7,12 @@ from unittest.mock import patch
 import io
 import json
 import sqlite3
-from workbench.desktop import launch, inspect_service, main, wait_for_product_release, stop_workbench
+from workbench.desktop import (launch, inspect_service, main, wait_for_product_release,
+                               stop_workbench, stop_service, terminate_listener, _posix_listener)
 import hashlib
 import os
+import signal
+import subprocess
 
 
 class DesktopLaunchTests(unittest.TestCase):
@@ -45,18 +48,110 @@ class DesktopLaunchTests(unittest.TestCase):
                 with patch('workbench.desktop.inspect_service', side_effect=['same','free']), \
                      patch('workbench.desktop.urllib.request.build_opener') as opener, \
                      patch('workbench.desktop.listener_process', return_value=(123456,command)), \
-                     patch('workbench.desktop.subprocess.run') as run, \
+                     patch('workbench.desktop.terminate_listener') as kill, \
                      patch('sys.stdout', new_callable=io.StringIO):
                     opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"items":[]}')
-                    run.return_value.returncode = 0
                     if allowed:
                         stop_workbench(runtime,8001)
-                        self.assertEqual(['taskkill.exe','/PID','123456','/F'],run.call_args.args[0])
+                        self.assertEqual((123456,), kill.call_args.args)
                     else:
                         with self.assertRaisesRegex(RuntimeError,'不是指定目录'):
                             stop_workbench(runtime,8001)
-                        run.assert_not_called()
+                        kill.assert_not_called()
                     self.assertEqual('keep',evidence.read_text())
+
+    def test_posix_stop_sends_sigterm_to_the_verified_listener(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            command = ['python','-m','workbench.cli','serve-workbench','--port','8001',
+                       '--runtime-dir',str(runtime)]
+            with patch('workbench.desktop.os.name','posix'), \
+                 patch('workbench.desktop.os.kill') as kill, \
+                 patch('workbench.desktop.inspect_service', side_effect=['same','free']), \
+                 patch('workbench.desktop.urllib.request.build_opener') as opener, \
+                 patch('workbench.desktop.listener_process', return_value=(4321,command)), \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"items":[]}')
+                result = stop_service(runtime, 8001, 'workbench')
+                self.assertEqual('stopped', result['state'])
+                self.assertEqual(4321, result['pid'])
+                self.assertEqual((4321, signal.SIGTERM), kill.call_args.args)
+                self.assertIn('任务与证据保留', output.getvalue())
+
+    def test_foreign_listener_is_never_terminated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for surface, command in [('workbench', ['python','-m','workbench.cli','serve-workbench']),
+                                     ('flowerp', ['python','-m','workbench.cli','serve-workbench',
+                                                  '--port','8002','--runtime-dir',str(Path(directory))])]:
+                with patch('workbench.desktop.inspect_service', return_value='same'), \
+                     patch('workbench.desktop.urllib.request.build_opener') as opener, \
+                     patch('workbench.desktop.listener_process', return_value=(999,command)), \
+                     patch('workbench.desktop.terminate_listener') as kill:
+                    opener.return_value.open.return_value.__enter__.return_value = io.StringIO('{"items":[]}')
+                    with self.assertRaisesRegex(RuntimeError,'不是指定目录'):
+                        stop_service(Path(directory), 8002, surface)
+                    kill.assert_not_called()
+
+    def test_free_port_is_reported_as_not_running(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('workbench.desktop.inspect_service', return_value='free'), \
+             patch('workbench.desktop.listener_process') as listener:
+            self.assertEqual('not_running', stop_service(Path(directory), 8001)['state'])
+            listener.assert_not_called()
+
+    def test_posix_listener_needs_one_owner_and_a_readable_command(self):
+        lsof = subprocess.CompletedProcess([], 0, stdout='4859\n')
+        ps = subprocess.CompletedProcess([], 0, stdout='python3 -X utf8 -m workbench.cli serve-workbench --port 8001\n')
+        with patch('workbench.desktop.os.name','posix'), \
+             patch('workbench.desktop.subprocess.run', side_effect=[lsof, ps]) as run:
+            pid, arguments = _posix_listener(8001)
+            self.assertEqual(4859, pid)
+            self.assertEqual(['workbench.cli','serve-workbench'], arguments[arguments.index('-m')+1:arguments.index('-m')+3])
+            self.assertEqual(['lsof','-ti','tcp:8001','-sTCP:LISTEN'], run.call_args_list[0].args[0])
+        empty = subprocess.CompletedProcess([], 1, stdout='')
+        with patch('workbench.desktop.os.name','posix'), \
+             patch('workbench.desktop.subprocess.run', return_value=empty):
+            with self.assertRaisesRegex(RuntimeError,'没有可停止的监听进程'):
+                _posix_listener(8001)
+        shared = subprocess.CompletedProcess([], 0, stdout='11\n22\n')
+        with patch('workbench.desktop.os.name','posix'), \
+             patch('workbench.desktop.subprocess.run', return_value=shared):
+            with self.assertRaisesRegex(RuntimeError,'不唯一'):
+                _posix_listener(8001)
+
+    def test_windows_stop_still_uses_taskkill(self):
+        with patch('workbench.desktop.os.name','nt'), patch('workbench.desktop.subprocess.run') as run:
+            run.return_value.returncode = 0
+            terminate_listener(123456)
+            self.assertEqual(['taskkill.exe','/PID','123456','/F'], run.call_args.args[0])
+        with patch('workbench.desktop.os.name','nt'), patch('workbench.desktop.subprocess.run') as run:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(RuntimeError,'未能停止旧服务'):
+                terminate_listener(123456)
+
+    def test_stop_flag_stops_services_without_launching(self):
+        with patch('workbench.desktop.launch') as start, \
+             patch('workbench.desktop.stop_service', side_effect=[
+                 {'state':'stopped','surface':'workbench'}, {'state':'not_running','surface':'flowerp'}]) as stop, \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(0, main(['--stop','--erp-port','8002']))
+            start.assert_not_called()
+            self.assertEqual([(8001,'workbench'), (8002,'flowerp')],
+                             [(call.args[1], call.args[2]) for call in stop.call_args_list])
+            self.assertIn('"stopped"', output.getvalue())
+
+    def test_stop_flag_can_target_one_service_and_reports_failure(self):
+        with patch('workbench.desktop.launch') as start, \
+             patch('workbench.desktop.stop_service', return_value={'state':'stopped'}) as stop, \
+             patch('sys.stdout', new_callable=io.StringIO):
+            main(['--stop','workbench'])
+            self.assertEqual(1, stop.call_count)
+            self.assertEqual('workbench', stop.call_args.args[2])
+            start.assert_not_called()
+        with patch('workbench.desktop.stop_service', side_effect=RuntimeError('端口 8000 上的服务不是本运行目录的FlowERP')), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(1, main(['--stop','flowerp']))
+            self.assertIn('不是本运行目录', output.getvalue())
 
     def test_active_work_prevents_termination(self):
         with patch('workbench.desktop.inspect_service', return_value='same'), \

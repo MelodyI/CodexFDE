@@ -183,7 +183,17 @@ python -X utf8 -m workbench.cli demo
 
 在两个仓库环境均已准备好、FlowERP 已登记或已设置 `FLOWERP_PROJECT_ROOT` 后，在本仓库根目录执行 `python main.py`，或双击 `打开工作台.cmd`，启动工作台（8001）与 FlowERP（8000）。从系统 Python 调用 `main.py` 时会转入本仓库 `.venv`；请勿使用其他项目的已激活虚拟环境。服务在后台运行，启动命令完成后仍可访问页面。需要打开浏览器时使用 `python main.py --open-browser`。
 
-默认会核对身份并重启同目录的旧工作台；有运行中事项时会拒绝重启。`python main.py --reuse` 则复用已有工作台。自动重启目前仅支持 Windows，macOS/Linux 已有服务时请使用 `--reuse`，或手动停止后重新启动。启动结果中 `started` 表示新启动，`restarted` 表示已重启，`reused` 表示复用；若端口属于其他服务或不同数据目录，会报错，不会自动切换端口或数据库。通过该入口新启动的工作台启用网页代码执行能力，每次具体执行仍需在网页核对方案并授权；复用服务时保留其原有启动设置。
+默认会核对身份并重启同目录的旧工作台；有运行中事项时会拒绝重启。`python main.py --reuse` 则复用已有工作台。自动重启在 Windows、macOS 与 Linux 上都可用：Windows 用 `taskkill.exe`，macOS/Linux 用 `lsof` 定位监听进程后发 `SIGTERM`。启动结果中 `started` 表示新启动，`restarted` 表示已重启，`reused` 表示复用；若端口属于其他服务或不同数据目录，会报错，不会自动切换端口或数据库。通过该入口新启动的工作台启用网页代码执行能力，每次具体执行仍需在网页核对方案并授权；复用服务时保留其原有启动设置。
+
+#### 停止本机服务
+
+```powershell
+python main.py --stop             # 停止工作台与 FlowERP
+python main.py --stop workbench   # 只停止工作台
+python main.py --stop flowerp     # 只停止 FlowERP
+```
+
+停止前会核对三件事：端口上的服务身份属于本运行目录、监听进程确由本入口启动（Windows 读命令行，macOS/Linux 用 `lsof` + `ps` 核对）、工作台没有运行中的事项。任一核对失败就报错退出，**不会停止任何进程**；端口属于 nginx 等其他服务时只报 `failed`，不会误杀。停止只针对验证过的单个进程，不按进程树杀。输出中 `stopped` 表示已停止，`not_running` 表示本来就没运行，`failed` 表示拒绝停止并给出原因；存在 `failed` 时命令返回非零。任务、证据与数据库全部保留，不必手工删锁文件。自定义端口时同样要带上对应参数，例如 `python main.py --stop --erp-port 8002`。
 
 若输出客户项目 `unavailable`，命令返回失败，但已启动的工作台仍可访问。先检查 FlowERP 仓库选择与其 `.venv`；只使用工作台时直接运行 `python -X utf8 -m workbench.cli serve-workbench`。
 

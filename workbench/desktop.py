@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -20,10 +22,39 @@ from .runtime_lease import WorkbenchRuntimeLease
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _posix_listener(port: int) -> tuple[int, list[str]]:
+    """Resolve the single macOS/Linux listener with lsof and ps, without a shell."""
+    try:
+        owners = subprocess.run(['lsof', '-ti', f'tcp:{int(port)}', '-sTCP:LISTEN'],
+                                capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError('无法列出端口占用进程（需要 lsof），未停止任何进程') from error
+    if owners.returncode not in (0, 1):
+        raise RuntimeError('无法列出端口占用进程，未停止任何进程')
+    pids = [line.strip() for line in owners.stdout.splitlines() if line.strip()]
+    if not pids:
+        raise RuntimeError('端口上没有可停止的监听进程')
+    if len(pids) > 1:
+        raise RuntimeError('监听进程不唯一，未停止任何进程')
+    try:
+        pid = int(pids[0])
+    except ValueError as error:
+        raise RuntimeError('无法识别监听进程，未停止任何进程') from error
+    try:
+        detail = subprocess.run(['ps', '-o', 'command=', '-p', str(pid)],
+                                capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError('无法核对旧服务命令，未停止任何进程') from error
+    command = detail.stdout.strip()
+    if detail.returncode or not command:
+        raise RuntimeError('无法核对旧服务命令，未停止任何进程')
+    return pid, shlex.split(command)
+
+
 def listener_process(port: int) -> tuple[int, list[str]]:
-    """Read the actual listener and parse its Windows command line without a shell."""
+    """Read the actual listener and parse its command line without a shell."""
     if os.name != 'nt':
-        raise RuntimeError('自动重启目前支持 Windows；请先停止原工作台服务，或使用 --reuse')
+        return _posix_listener(port)
     script = ('[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); '
               f'$owners = @(Get-NetTCPConnection -LocalPort {int(port)} -State Listen '
               '| Select-Object -ExpandProperty OwningProcess -Unique); '
@@ -57,10 +88,8 @@ def listener_process(port: int) -> tuple[int, list[str]]:
         raise RuntimeError('无法识别旧服务命令，未停止任何进程') from error
 
 
-def stop_workbench(runtime: Path, port: int, timeout: float = 20) -> None:
-    """Only stop the verified workbench listener; never kill a process tree."""
-    if inspect_service(port, runtime) != 'same':
-        raise RuntimeError('旧服务身份已变化，取消重启')
+def assert_no_running_work(port: int) -> None:
+    """Refuse to stop a workbench that still owns running work."""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def read(path):
         with opener.open(f'http://127.0.0.1:{port}{path}', timeout=5) as response:
@@ -72,32 +101,87 @@ def stop_workbench(runtime: Path, port: int, timeout: float = 20) -> None:
                 raise RuntimeError('工作台仍有运行中的事项，请先在页面停止任务并等待结束，再重启')
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise RuntimeError('无法核对运行中的事项，未停止旧服务') from error
-    pid, arguments = listener_process(port)
+
+
+def terminate_listener(pid: int, *, timeout: float = 15) -> None:
+    """Terminate one verified process; never a process tree."""
+    if os.name == 'nt':
+        result = subprocess.run(['taskkill.exe', '/PID', str(pid), '/F'], capture_output=True,
+                                timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            raise RuntimeError('未能停止旧服务，请核对权限或原启动窗口')
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError as error:
+        raise RuntimeError(f'未能停止旧服务：{error}') from error
+
+
+def command_matches_service(arguments: list[str], runtime: Path, port: int, surface: str) -> bool:
+    """Only accept a listener that is our own service for this data directory."""
     try:
         module = arguments.index('-m')
         location = arguments[arguments.index('--runtime-dir') + 1]
-        listener_port = arguments[arguments.index('--port') + 1]
-        matches = (arguments[module + 1:module + 3] == ['workbench.cli', 'serve-workbench']
-                   and Path(location).is_absolute() and Path(location).resolve() == runtime.resolve()
-                   and int(listener_port) == port and pid > 0 and pid != os.getpid())
+        listener_port = int(arguments[arguments.index('--port') + 1])
     except (ValueError, IndexError):
-        matches = False
-    if not matches:
-        raise RuntimeError('监听进程不是指定目录的工作台服务，未停止任何进程')
-    print(f'正在重启工作台（端口 {port}，旧进程 {pid}），任务与证据保留。', flush=True)
-    result = subprocess.run(['taskkill.exe', '/PID', str(pid), '/F'], capture_output=True,
-                            timeout=15, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    if result.returncode:
-        raise RuntimeError('未能停止旧工作台服务，请核对权限或原启动窗口')
+        return False
+    expected = ['workbench.cli', 'serve-workbench'] if surface == 'workbench' else ['flowerp', 'serve']
+    return (arguments[module + 1:module + 3] == expected
+            and Path(location).is_absolute() and Path(location).resolve() == runtime.resolve()
+            and listener_port == port)
+
+
+def stop_service(runtime: Path, port: int, surface: str = 'workbench', timeout: float = 20) -> dict:
+    """Stop only the identity-verified listener of this runtime; data and evidence stay."""
+    if surface not in {'workbench', 'flowerp'}:
+        raise ValueError('未知的本地服务')
+    runtime = runtime.resolve()
+    label = '工作台' if surface == 'workbench' else 'FlowERP'
+    url = f'http://127.0.0.1:{port}'
+    state = inspect_service(port, runtime, surface)
+    if state == 'free':
+        return {'state': 'not_running', 'surface': surface, 'port': port, 'url': url}
+    if state != 'same':
+        raise RuntimeError(f'端口 {port} 上的服务不是本运行目录的{label}，未停止任何进程')
+    if surface == 'workbench':
+        assert_no_running_work(port)
+    pid, arguments = listener_process(port)
+    if pid <= 0 or pid == os.getpid() or not command_matches_service(arguments, runtime, port, surface):
+        raise RuntimeError(f'监听进程不是指定目录的{label}服务，未停止任何进程')
+    print(f'正在停止{label}（端口 {port}，进程 {pid}），任务与证据保留。', flush=True)
+    terminate_listener(pid)
     deadline = time.monotonic() + timeout
+    force_at = time.monotonic() + min(5.0, timeout / 2)
+    forced = False
     while time.monotonic() < deadline:
-        state = inspect_service(port, runtime)
+        state = inspect_service(port, runtime, surface)
         if state == 'free':
-            return
+            return {'state': 'stopped', 'surface': surface, 'port': port, 'pid': pid, 'url': url}
         if state == 'occupied':
-            raise RuntimeError('端口已被其他服务接管，取消启动')
+            raise RuntimeError('端口已被其他服务接管，请核对后再停止')
+        if not forced and os.name != 'nt' and time.monotonic() >= force_at:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+            forced = True
         time.sleep(.2)
-    raise RuntimeError('旧服务尚未释放端口，未启动第二个实例')
+    raise RuntimeError(f'{label}仍未释放端口 {port}，请查看启动日志后手工核对')
+
+
+def stop_workbench(runtime: Path, port: int, timeout: float = 20) -> None:
+    """Restart helper: stop the verified workbench listener before relaunch."""
+    stop_service(runtime, port, 'workbench', timeout)
+
+
+def stop_report(runtime: Path, port: int, surface: str) -> dict:
+    """Report one stop attempt honestly; a failure is never reported as stopped."""
+    try:
+        return stop_service(runtime, port, surface)
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+        return {'state': 'failed', 'surface': surface, 'port': port, 'message': str(error)}
 
 
 def wait_for_product_release(runtime: Path, *, timeout: float = 35) -> None:
@@ -211,6 +295,8 @@ def main(argv=None):
     parser.add_argument('--erp-port', type=int, default=8000)
     parser.add_argument('--open-browser', action='store_true')
     parser.add_argument('--reuse', action='store_true', help='复用已有工作台，不重启；默认重启同目录的旧工作台')
+    parser.add_argument('--stop', nargs='?', const='all', choices=['all', 'workbench', 'flowerp'],
+                        help='停止本机服务，任务与数据保留；默认同时停止工作台和 FlowERP')
     args = parser.parse_args(argv)
     if not all(1 <= port <= 65535 for port in (args.port, args.erp_port)) or args.port == args.erp_port:
         parser.error('工作台和 FlowERP 必须使用 1 到 65535 之间的不同端口')
@@ -221,6 +307,13 @@ def main(argv=None):
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 1
+    if args.stop:
+        targets = [('workbench', workbench_runtime, args.port), ('flowerp', erp_runtime, args.erp_port)]
+        if args.stop != 'all':
+            targets = [item for item in targets if item[0] == args.stop]
+        report = {surface: stop_report(runtime, port, surface) for surface, runtime, port in targets}
+        print(json.dumps(report, ensure_ascii=False))
+        return 1 if any(item['state'] == 'failed' for item in report.values()) else 0
     try:
         result = launch(workbench_runtime, args.port, erp_port=args.erp_port, restart=not args.reuse)
     except (OSError, RuntimeError, sqlite3.Error) as error:
