@@ -136,7 +136,7 @@ class DesktopLaunchTests(unittest.TestCase):
              patch('sys.stdout', new_callable=io.StringIO) as output:
             self.assertEqual(0, main(['--stop','--erp-port','8002']))
             start.assert_not_called()
-            self.assertEqual([(8001,'workbench'), (8002,'flowerp')],
+            self.assertEqual([(8901,'workbench'), (8002,'flowerp')],
                              [(call.args[1], call.args[2]) for call in stop.call_args_list])
             self.assertIn('"stopped"', output.getvalue())
 

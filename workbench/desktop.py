@@ -229,8 +229,8 @@ def inspect_service(port: int, runtime: Path, surface: str = 'workbench') -> str
             return 'free'
 
 
-def launch(runtime: Path, port: int = 8001, *, timeout: float = 20,
-           surface: str = 'workbench', erp_port: int = 8000, restart: bool = False) -> dict:
+def launch(runtime: Path, port: int = 8901, *, timeout: float = 20,
+           surface: str = 'workbench', erp_port: int = 8900, restart: bool = False) -> dict:
     if surface not in {'workbench', 'flowerp'}:
         raise ValueError('未知的本地服务')
     label = '工作台' if surface == 'workbench' else 'FlowERP'
@@ -291,8 +291,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='打开个人研发工作台，保留原任务和启动记录')
     parser.add_argument('--runtime-dir', type=Path, help='显式覆盖工作台运行目录')
     parser.add_argument('--erp-runtime-dir', type=Path, help='显式覆盖 FlowERP 运行目录')
-    parser.add_argument('--port', type=int, default=8001)
-    parser.add_argument('--erp-port', type=int, default=8000)
+    parser.add_argument('--port', type=int, default=8901)
+    parser.add_argument('--erp-port', type=int, default=8900)
     parser.add_argument('--open-browser', action='store_true')
     parser.add_argument('--reuse', action='store_true', help='复用已有工作台，不重启；默认重启同目录的旧工作台')
     parser.add_argument('--stop', nargs='?', const='all', choices=['all', 'workbench', 'flowerp'],
